@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { ArrowLeft, ArrowRight, Calculator, Save } from 'lucide-react';
 import { useApp } from '../hooks/useApp';
 import { calculatePrice } from '../services/domain';
-import type { PriceExtra, PriceInput, PriceResult } from '../services/domain/pricing';
+import { DESCONTO_SEM_APROVACAO, type PriceExtra, type PriceInput, type PriceResult } from '../services/domain/pricing';
 import type { Entity } from '../types/domain';
 
 const PLANOS = ['Essencial', 'Mentor', 'Estratégico'] as const;
@@ -28,13 +28,13 @@ const MARCADORES = [
   { campo: 'monofasico', rotulo: 'PIS/COFINS monofásico', ajuda: 'Acréscimo de R$ 100,00.' },
 ] as const;
 const ETAPAS = ['Empresa', 'Plano', 'Operação', 'Integração', 'Extras', 'Resultado'] as const;
-const CATEGORIAS: Record<string, string> = { base: 'Faixa de faturamento', plano: 'Plano contratado', criterio: 'Critérios operacionais', integracao: 'Nível de integração', extra: 'Serviços adicionais' };
+const CATEGORIAS: Record<string, string> = { base: 'Faixa de faturamento', plano: 'Plano contratado', criterio: 'Critérios operacionais', integracao: 'Nível de integração', extra: 'Serviços adicionais', ajuste: 'Ajuste comercial' };
 
 const dinheiro = (centavos: number) => (centavos / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const texto = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 
 export default function SimulationWizard({ lead, onClose, onSaved }: { lead?: Entity; onClose: () => void; onSaved?: (valor: number) => void }) {
-  const { state, execute, busy, notice } = useApp();
+  const { state, actor, execute, busy, notice } = useApp();
   const [etapa, setEtapa] = useState(0);
   const [erro, setErro] = useState('');
   const [entradas, setEntradas] = useState<Record<string, unknown>>({
@@ -45,17 +45,25 @@ export default function SimulationWizard({ lead, onClose, onSaved }: { lead?: En
   });
   const [extras, setExtras] = useState<PriceExtra[]>([]);
   const [observacoes, setObservacoes] = useState('');
+  const [ajusteTipo, setAjusteTipo] = useState<'' | 'desconto' | 'acrescimo'>('');
+  const [ajustePercentual, setAjustePercentual] = useState('');
+  const [ajusteJustificativa, setAjusteJustificativa] = useState('');
+  const socio = actor.papel === 'socio';
+  const tabelaAprovada = state.configuracoes.find(item => item.id === 'tabela-precos')?.tabelaIndustriaAprovada === true;
+  const ajuste = ajusteTipo && ajustePercentual
+    ? { tipo: ajusteTipo, percentual: Number(ajustePercentual), justificativa: ajusteJustificativa, ...(socio ? { aprovadoPorId: actor.memberId || actor.id } : {}) }
+    : undefined;
 
   const servicosAtivos = state.servicos.filter(item => item.ativo !== false);
   const definir = (campo: string, valor: unknown) => setEntradas(atual => ({ ...atual, [campo]: valor }));
 
   const { resultado, bloqueio } = useMemo(() => {
     try {
-      return { resultado: calculatePrice({ ...entradas, extras } as unknown as PriceInput) as PriceResult, bloqueio: '' };
+      return { resultado: calculatePrice({ ...entradas, extras, ajuste, tabelaIndustriaAprovada: tabelaAprovada } as unknown as PriceInput) as PriceResult, bloqueio: '' };
     } catch (causa) {
       return { resultado: null, bloqueio: causa instanceof Error ? causa.message : 'Não foi possível calcular.' };
     }
-  }, [entradas, extras]);
+  }, [entradas, extras, ajuste, tabelaAprovada]);
 
   const salvar = async () => {
     if (!resultado) { setErro(bloqueio); return; }
@@ -63,6 +71,7 @@ export default function SimulationWizard({ lead, onClose, onSaved }: { lead?: En
       await execute({ type: 'saveSimulation', data: {
         leadId: lead?.id ?? '',
         entradas: JSON.parse(JSON.stringify({ ...entradas, extras })),
+        ajuste: ajuste ? JSON.parse(JSON.stringify(ajuste)) : {},
         observacoes,
       } });
       notice('Simulação salva com a versão da tabela usada.');
@@ -153,7 +162,20 @@ export default function SimulationWizard({ lead, onClose, onSaved }: { lead?: En
         {etapa === 5 ? <div className="sim-resultado">
           {bloqueio ? <p className="sim-bloqueio">{bloqueio}</p> : null}
           {resultado ? <>
-            <div className="sim-total"><small>Total mensal</small><strong>{dinheiro(resultado.totalCentavos)}</strong></div>
+            <div className="sim-total">
+              {resultado.ajusteCentavos !== 0 ? <p className="sim-total-linha"><span>Valor original</span><b>{dinheiro(resultado.subtotalCentavos)}</b></p> : null}
+              {resultado.ajusteCentavos !== 0 ? <p className="sim-total-linha"><span>{resultado.ajusteCentavos < 0 ? 'Desconto' : 'Acréscimo'}</span><b>{dinheiro(resultado.ajusteCentavos)}</b></p> : null}
+              <small>Total mensal</small><strong>{dinheiro(resultado.totalCentavos)}</strong>
+            </div>
+            <div className="sim-grid" style={{ marginBottom: 18 }}>
+              <label>Ajuste comercial<select value={ajusteTipo} onChange={event => setAjusteTipo(event.target.value as 'desconto' | 'acrescimo' | '')}>
+                <option value="">Sem ajuste</option><option value="desconto">Desconto</option><option value="acrescimo">Acréscimo</option>
+              </select>
+              <small>O total nunca é digitado. Todo ajuste entra como linha identificada.</small></label>
+              {ajusteTipo ? <label>Percentual<input type="number" min="0.1" max="100" step="0.1" value={ajustePercentual} onChange={event => setAjustePercentual(event.target.value)} placeholder="Ex.: 10"/>
+                <small>{ajusteTipo === 'desconto' ? `Acima de ${DESCONTO_SEM_APROVACAO}% só com aprovação do sócio.${socio ? ' Você é sócio, então a aprovação fica registrada em seu nome.' : ''}` : 'Acréscimo também exige justificativa.'}</small></label> : null}
+              {ajusteTipo ? <label className="sim-span">Justificativa<input value={ajusteJustificativa} onChange={event => setAjusteJustificativa(event.target.value)} placeholder="Por que este ajuste está sendo aplicado"/></label> : null}
+            </div>
             {agrupado.map(grupo => <div className="sim-grupo" key={grupo.categoria}>
               <h4>{CATEGORIAS[grupo.categoria]}</h4>
               <table><tbody>{grupo.itens.map(linha => <tr key={linha.nome}>
@@ -163,7 +185,7 @@ export default function SimulationWizard({ lead, onClose, onSaved }: { lead?: En
               </tr>)}</tbody></table>
             </div>)}
             <label className="sim-span">Observações<textarea rows={3} value={observacoes} onChange={event => setObservacoes(event.target.value)} placeholder="O que foi combinado e o que ficou de fora."/></label>
-            {resultado.alertas.map(alerta => <p className="sim-alerta" key={alerta}>{alerta}</p>)}
+            {resultado.alertas.map(alerta => <p className={'sim-alerta' + (/sugerida/i.test(alerta) ? ' destaque' : '')} key={alerta}>{alerta}</p>)}
           </> : null}
         </div> : null}
       </div>

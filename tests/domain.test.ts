@@ -99,8 +99,10 @@ describe('Preço comercial fornecido, com centavos e limites explícitos',()=>{
   const price=calculatePrice({...base,plano:'Mentor',colaboradores:4,extras:[{servicoId:'extra-test',nome:'Extra isolado',valor:20.1,quantidade:3}]});
   expect(price.totalCentavos).toBe(71730);expect(price.total).toBe(717.3);expect(price.itens.reduce((sum,item)=>sum+item.totalCentavos,0)).toBe(price.totalCentavos);
  });
- it('não presume tabela industrial ou faturamento além da faixa',()=>{
-  expect(()=>calculatePrice({...base,atividade:'Indústria'})).toThrow('não foi fornecida');expect(()=>calculatePrice({...base,faturamento:400000.01})).toThrow('última faixa');
+ it('marca Indústria como parametrização sugerida e barra faturamento além da faixa',()=>{
+  const industria=calculatePrice({...base,atividade:'Indústria'});
+  expect(industria.parametrizacaoSugerida).toBe(true);
+  expect(()=>calculatePrice({...base,faturamento:400000.01})).toThrow('maior faixa parametrizada');
  });
  it('rejeita quantidades inválidas e serviço zero sem aprovação',()=>{
   expect(()=>calculatePrice({...base,colaboradores:1.5})).toThrow('inteira');expect(()=>calculatePrice({...base,extras:[{servicoId:'zero',nome:'Sem preço',valor:0,quantidade:1}]})).toThrow('aprovação');

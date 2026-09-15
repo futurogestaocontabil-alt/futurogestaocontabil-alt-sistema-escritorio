@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialState, runCommand } from '../src/services/domain/index';
 import { dueDateFor, nextCompetence } from '../src/services/domain/engine';
-import type { Actor, AppState, Command, Entity } from '../src/types/domain';
+import type { Actor, AppState, Command, Entity, JsonValue } from '../src/types/domain';
 
 const socio:Actor={id:'gilmar',memberId:'gilmar',nome:'Gilmar',email:'g@example.test',papel:'socio',departamentos:['Comercial','Atendimento','Administrativo','Financeiro','Fiscal','Contábil','Pessoal','Paralegal e Legalização']};
 const administrativo:Actor={id:'tamires',memberId:'tamires',nome:'Tamires',email:'t@example.test',papel:'administrativo',departamentos:['Comercial','Atendimento','Administrativo','Financeiro']};
@@ -43,7 +43,7 @@ describe('Simulação salva', () => {
    extras:[{servicoId:'servico-a',nome:'valor errado de propósito',valor:1,quantidade:1}]}}});
   const simulacao=first(state,'simulacoes');
   expect(simulacao.valor).toBe(977+400);
-  expect(simulacao.versaoPreco).toBe('escopo-4.4-v1');
+  expect(simulacao.versaoPreco).toBe('escopo-4.5-v1');
   expect(simulacao.responsavelId).toBe('gilmar');
   const entradas=simulacao.entradas as Record<string,Record<string,unknown>[]>;
   expect(entradas.extras[0]).toMatchObject({valor:400,nome:'Abertura de filial'});
@@ -55,7 +55,7 @@ describe('Simulação salva', () => {
 
  it('exige aprovação do sócio para serviço sem preço e recusa serviço inativo', () => {
   let state=comLead();
-  state=run(state,{type:'save',collection:'servicos',id:'gratis',data:{nome:'Cortesia',departamento:'Administrativo',valor:0,ativo:true}});
+  state=run(state,{type:'save',collection:'servicos',id:'gratis',data:{nome:'Cortesia',departamento:'Administrativo',valor:0,ativo:true,situacaoPreco:'Cortesia com aprovação do sócio'}});
   state=run(state,{type:'save',collection:'servicos',id:'inativo',data:{nome:'Descontinuado',departamento:'Administrativo',valor:100,ativo:false}});
   const entradas={plano:'Essencial',atividade:'Serviços',regime:'Simples Nacional',faturamento:6750};
   expect(()=>run(state,{type:'saveSimulation',data:{leadId:'lead-a',entradas:{...entradas,extras:[{servicoId:'gratis',nome:'Cortesia',valor:0,quantidade:1}]}}},administrativo)).toThrow(/aprovação explícita do sócio/);
@@ -257,5 +257,51 @@ describe('Vencimento e competência', () => {
  it('vira o ano corretamente na competência seguinte', () => {
   expect(nextCompetence('2026-09')).toBe('2026-10');
   expect(nextCompetence('2026-12')).toBe('2027-01');
+ });
+});
+
+describe('Catálogo de serviços e desconto', () => {
+ const catalogo = (situacaoPreco: string, valor = 250) => ({ nome: 'Serviço de teste', departamento: 'Administrativo', valor, ativo: true, situacaoPreco });
+ const entradas = { plano: 'Essencial', atividade: 'Serviços', regime: 'Simples Nacional', faturamento: 50000 };
+
+ it('exige classificação explícita para serviço com valor zero', () => {
+  const state=comLead();
+  expect(()=>run(state,{type:'save',collection:'servicos',id:'zerado',data:{nome:'Sem preço',departamento:'Administrativo',valor:0}})).toThrow(/exige classificação/);
+  const classificado=run(state,{type:'save',collection:'servicos',id:'zerado',data:catalogo('Incluído no plano',0)});
+  expect(classificado.servicos.find(item=>item.id==='zerado')!.situacaoPreco).toBe('Incluído no plano');
+  expect(()=>run(state,{type:'save',collection:'servicos',id:'z2',data:{...catalogo('Situação inventada',0)}})).toThrow(/Situação do preço/);
+ });
+
+ it('impede que serviço aguardando preço entre em simulação ou proposta', () => {
+  let state=comLead();
+  state=run(state,{type:'save',collection:'servicos',id:'pendente',data:catalogo('Aguardando definição de preço')});
+  expect(()=>run(state,{type:'saveSimulation',data:{leadId:'lead-a',entradas:{...entradas,extras:[{servicoId:'pendente',nome:'Serviço de teste',valor:250,quantidade:1}]}}})).toThrow(/Aguardando definição de preço/);
+  state=run(state,{type:'save',collection:'servicos',id:'pendente',data:{situacaoPreco:'Preço aprovado'}});
+  expect(run(state,{type:'saveSimulation',data:{leadId:'lead-a',entradas:{...entradas,extras:[{servicoId:'pendente',nome:'Serviço de teste',valor:250,quantidade:1}]}}}).simulacoes[0].valor).toBe(797);
+ });
+
+ it('só deixa o sócio classificar um serviço como cortesia', () => {
+  const state=comLead();
+  // O catálogo já é restrito ao sócio. A trava da cortesia é a segunda camada,
+  // para o caso de o acesso ao catálogo ser afrouxado no futuro.
+  expect(()=>run(state,{type:'save',collection:'servicos',id:'cortesia',data:catalogo('Cortesia com aprovação do sócio',0)},administrativo)).toThrow(/sócio/);
+  expect(run(state,{type:'save',collection:'servicos',id:'cortesia',data:catalogo('Cortesia com aprovação do sócio',0)}).servicos.find(item=>item.id==='cortesia')).toBeDefined();
+ });
+
+ it('aceita desconto de até dez por cento sem aprovação e barra acima disso', () => {
+  const state=comLead();
+  const simular=(ajuste:Record<string,JsonValue>,ator=administrativo)=>run(state,{type:'saveSimulation',data:{leadId:'lead-a',entradas,ajuste}},ator);
+  const dentro=simular({tipo:'desconto',percentual:10,justificativa:'Fechamento imediato'});
+  expect(dentro.simulacoes[0]).toMatchObject({valor:492.3,subtotal:547,ajuste:-54.7,justificativaAjuste:'Fechamento imediato'});
+  expect(()=>simular({tipo:'desconto',percentual:15,justificativa:'Negociação'})).toThrow(/exige aprovação do sócio/);
+  // O sócio aprova pelo próprio ato de simular.
+  const aprovado=simular({tipo:'desconto',percentual:15,justificativa:'Cliente estratégico'},socio);
+  expect(aprovado.simulacoes[0]).toMatchObject({valor:464.95,aprovadorAjusteId:'gilmar'});
+ });
+
+ it('marca a simulação de Indústria como parametrização sugerida', () => {
+  const state=comLead();
+  const simulada=run(state,{type:'saveSimulation',data:{leadId:'lead-a',entradas:{...entradas,atividade:'Indústria'}}});
+  expect(simulada.simulacoes[0]).toMatchObject({valor:725,parametrizacaoSugerida:true});
  });
 });

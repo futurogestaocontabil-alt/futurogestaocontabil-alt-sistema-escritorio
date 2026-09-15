@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { calculatePrice, PRICE_VERSION, type Plan, type PriceInput, type TaxRegime } from '../src/services/domain/pricing';
+import { calculatePrice, DESCONTO_SEM_APROVACAO, PRICE_VERSION, type Activity, type Plan, type PriceInput, type TaxRegime } from '../src/services/domain/pricing';
 
 // As faixas abaixo são a tabela oficial informada por Gilmar em 15/09/2026.
 // Estão escritas à mão de propósito: o teste confere o motor contra a tabela,
 // e não contra ele mesmo. Alterar o motor sem alterar a tabela quebra o teste.
-const FAIXAS: Record<'Serviços'|'Comércio', Record<TaxRegime, [number, number][]>> = {
+const FAIXAS: Record<Activity, Record<TaxRegime, [number | null, number][]>> = {
  'Serviços': {
   'Simples Nacional': [[6750,199],[15000,297],[25000,397],[50000,547],[100000,747],[200000,1147],[400000,1299]],
   'Lucro Presumido': [[15000,327],[25000,457],[50000,597],[100000,857],[200000,1297],[300000,1997],[500000,2297],[800000,4115],[1500000,5225],[2500000,7844]],
@@ -17,6 +17,13 @@ const FAIXAS: Record<'Serviços'|'Comércio', Record<TaxRegime, [number, number]
   'Lucro Real': [[100000,1047],[300000,2588],[500000,2999],[600000,3590],[800000,4416],[1500000,5201],[2500000,8100]],
   'Imunes ou Isentas': [[100000,1337],[300000,2436],[500000,4811],[800000,5702],[1500000,6755],[2500000,9265]],
  },
+ // Parametrização sugerida por Gilmar em 15/09/2026, pendente de aprovação.
+ 'Indústria': {
+  'Simples Nacional': [[50000,725],[100000,1150],[200000,1638],[400000,1850],[null,2350]],
+  'Lucro Presumido': [[100000,1094],[300000,2813],[500000,3750],[800000,4800],[1500000,6469],[2500000,7188],[null,9500]],
+  'Lucro Real': [[100000,1138],[300000,2925],[500000,3906],[800000,4977],[1500000,6750],[2500000,7500],[null,10500]],
+  'Imunes ou Isentas': [[100000,1337],[300000,2436],[500000,4811],[800000,5702],[1500000,6755],[2500000,9265],[null,11000]],
+ },
 };
 const ADICIONAL_PLANO: Record<Plan, number> = { 'Essencial': 0, 'Mentor': 100, 'Estratégico': 560 };
 const base = (over: Partial<PriceInput> = {}): PriceInput =>
@@ -25,11 +32,12 @@ const item = (result: ReturnType<typeof calculatePrice>, nome: string) => result
 
 describe('Simulação de honorários, tabela oficial', () => {
  it('calcula todas as faixas de todas as atividades e regimes', () => {
-  for (const atividade of ['Serviços','Comércio'] as const)
+  for (const atividade of ['Serviços','Comércio','Indústria'] as const)
    for (const regime of Object.keys(FAIXAS[atividade]) as TaxRegime[])
     for (const [limite, esperado] of FAIXAS[atividade][regime]) {
-     const result = calculatePrice(base({ atividade, regime, faturamento: limite }));
-     expect(result.total, `${atividade} / ${regime} / até ${limite}`).toBe(esperado);
+     const faturamento = limite ?? 9_000_000;
+     const result = calculatePrice(base({ atividade, regime, faturamento, tabelaIndustriaAprovada: true }));
+     expect(result.total, `${atividade} / ${regime} / até ${limite ?? 'sem teto'}`).toBe(esperado);
      expect(result.faixaCentavos).toBe(esperado * 100);
      expect(result.limiteFaturamento).toBe(limite);
     }
@@ -64,10 +72,12 @@ describe('Simulação de honorários, critérios operacionais', () => {
   expect(criterio({ colaboradores: 31 })).toBe(31 * 30);
  });
 
- it('cobra trinta reais por sócio com pró-labore e bloqueia acima de três', () => {
+ it('cobra trinta reais por sócio até três e vinte a partir do quarto', () => {
   expect(criterio({ proLabore: 1 })).toBe(30);
   expect(criterio({ proLabore: 3 })).toBe(90);
-  expect(() => calculatePrice(base({ proLabore: 4 }))).toThrow(/até 3 pessoas/);
+  // A partir do quarto sócio o valor por pessoa cai para R$ 20,00.
+  expect(criterio({ proLabore: 4 })).toBe(4 * 20);
+  expect(criterio({ proLabore: 9 })).toBe(9 * 20);
  });
 
  it('cobra contas financeiras, ponto por colaborador e guias DIFAL pelas faixas', () => {
@@ -132,13 +142,23 @@ describe('Simulação de honorários, serviços extras', () => {
 });
 
 describe('Simulação de honorários, bloqueios', () => {
- it('bloqueia a atividade Indústria enquanto não houver tabela parametrizada', () => {
-  expect(() => calculatePrice(base({ atividade: 'Indústria' }))).toThrow(/Indústria/);
+ it('marca a tabela de Indústria como sugerida até o sócio aprovar', () => {
+  const semAprovacao = calculatePrice(base({ atividade: 'Indústria', faturamento: 50000 }));
+  expect(semAprovacao.total).toBe(725);
+  expect(semAprovacao.parametrizacaoSugerida).toBe(true);
+  expect(semAprovacao.alertas.some(alerta => /parametrização comercial sugerida/i.test(alerta))).toBe(true);
+  const aprovada = calculatePrice(base({ atividade: 'Indústria', faturamento: 50000, tabelaIndustriaAprovada: true }));
+  expect(aprovada.parametrizacaoSugerida).toBe(false);
+  expect(aprovada.alertas.some(alerta => /sugerida/i.test(alerta))).toBe(false);
+  // Serviços e Comércio nunca são marcados como sugeridos.
+  expect(calculatePrice(base()).parametrizacaoSugerida).toBe(false);
  });
 
- it('bloqueia faturamento acima da última faixa parametrizada', () => {
-  expect(() => calculatePrice(base({ faturamento: 400001 }))).toThrow(/acima da última faixa/);
-  expect(() => calculatePrice(base({ atividade: 'Comércio', regime: 'Lucro Real', faturamento: 2500001 }))).toThrow(/acima da última faixa/);
+ it('atende faturamento sem teto apenas onde existe faixa aberta', () => {
+  expect(calculatePrice(base({ atividade: 'Indústria', faturamento: 50_000_000, tabelaIndustriaAprovada: true })).total).toBe(2350);
+  expect(calculatePrice(base({ atividade: 'Indústria', regime: 'Lucro Real', faturamento: 50_000_000, tabelaIndustriaAprovada: true })).total).toBe(10500);
+  expect(() => calculatePrice(base({ faturamento: 400001 }))).toThrow(/acima da maior faixa parametrizada/);
+  expect(() => calculatePrice(base({ atividade: 'Comércio', regime: 'Lucro Real', faturamento: 2500001 }))).toThrow(/acima da maior faixa parametrizada/);
  });
 
  it('recusa faturamento e quantidades inválidas', () => {
@@ -189,7 +209,7 @@ describe('Simulação de honorários, resultado', () => {
  it('carimba a versão da regra e avisa que não é cálculo de tributos', () => {
   const result = calculatePrice(base());
   expect(result.versao).toBe(PRICE_VERSION);
-  expect(PRICE_VERSION).toBe('escopo-4.4-v1');
+  expect(PRICE_VERSION).toBe('escopo-4.5-v1');
   expect(result.alertas).toContain('Simulação comercial com base na tabela fornecida. Não é cálculo de tributos.');
   expect(JSON.stringify(result)).not.toMatch(/economia/i);
  });
@@ -207,5 +227,52 @@ describe('Simulação de honorários, categorias do detalhamento', () => {
   expect(porCategoria('criterio')).toEqual(['Colaboradores']);
   expect(porCategoria('integracao')).toEqual(['Integração contábil']);
   expect(result.itens.every(line => ['base','plano','criterio','integracao','extra'].includes(line.categoria))).toBe(true);
+ });
+});
+
+describe('Simulação de honorários, desconto e acréscimo', () => {
+ const comAjuste = (ajuste: PriceInput['ajuste']) => calculatePrice(base({ faturamento: 50000, ajuste }));
+
+ it('aceita desconto até o limite sem aprovação e cobra justificativa', () => {
+  expect(DESCONTO_SEM_APROVACAO).toBe(10);
+  const result = comAjuste({ tipo: 'desconto', percentual: 10, justificativa: 'Fechamento no mesmo dia' });
+  expect(result.subtotalCentavos).toBe(54700);
+  expect(result.ajusteCentavos).toBe(-5470);
+  expect(result.total).toBe(492.3);
+  expect(result.itens.find(linha => linha.categoria === 'ajuste')).toMatchObject({ nome: 'Desconto de 10%', totalCentavos: -5470 });
+  expect(() => comAjuste({ tipo: 'desconto', percentual: 10 })).toThrow(/exige justificativa/);
+ });
+
+ it('exige aprovação do sócio acima do limite, por percentual e por valor', () => {
+  expect(() => comAjuste({ tipo: 'desconto', percentual: 10.5, justificativa: 'Negociação' })).toThrow(/exige aprovação do sócio/);
+  expect(() => comAjuste({ tipo: 'desconto', valor: 100, justificativa: 'Negociação' })).toThrow(/exige aprovação do sócio/);
+  const aprovado = comAjuste({ tipo: 'desconto', percentual: 25, justificativa: 'Cliente estratégico', aprovadoPorId: 'gilmar' });
+  expect(aprovado.ajusteCentavos).toBe(-13675);
+  expect(aprovado.total).toBe(410.25);
+  // Desconto em valor dentro do limite dispensa aprovação.
+  expect(comAjuste({ tipo: 'desconto', valor: 54.7, justificativa: 'Arredondamento combinado' }).total).toBe(492.3);
+ });
+
+ it('recusa ajuste inválido e desconto maior que o valor calculado', () => {
+  expect(() => comAjuste({ tipo: 'desconto', percentual: 10, valor: 50, justificativa: 'x' })).toThrow(/percentual ou por valor/);
+  expect(() => comAjuste({ tipo: 'desconto', justificativa: 'x' })).toThrow(/percentual ou por valor/);
+  expect(() => comAjuste({ tipo: 'desconto', percentual: 0, justificativa: 'x' })).toThrow(/Percentual de ajuste inválido/);
+  expect(() => comAjuste({ tipo: 'desconto', percentual: 120, justificativa: 'x' })).toThrow(/Percentual de ajuste inválido/);
+  expect(() => comAjuste({ tipo: 'desconto', valor: 10000, justificativa: 'x', aprovadoPorId: 'gilmar' })).toThrow(/maior que o valor calculado/);
+  expect(() => comAjuste({ tipo: 'reembolso' as 'desconto', valor: 10, justificativa: 'x' })).toThrow(/desconto ou acréscimo/);
+ });
+
+ it('registra acréscimo como linha identificada, também com justificativa', () => {
+  const result = comAjuste({ tipo: 'acrescimo', valor: 120, justificativa: 'Operação com filial' });
+  expect(result.ajusteCentavos).toBe(12000);
+  expect(result.total).toBe(667);
+  expect(() => comAjuste({ tipo: 'acrescimo', valor: 120 })).toThrow(/exige justificativa/);
+ });
+
+ it('mostra valor original, ajuste e valor final fechando entre si', () => {
+  const result = comAjuste({ tipo: 'desconto', percentual: 7.5, justificativa: 'Indicação do BNI' });
+  expect(result.subtotalCentavos + result.ajusteCentavos).toBe(result.totalCentavos);
+  expect(result.itens.reduce((soma, linha) => soma + linha.totalCentavos, 0)).toBe(result.totalCentavos);
+  expect(result.baseCentavos + result.faixaCentavos + result.criteriosCentavos + result.extrasCentavos).toBe(result.subtotalCentavos);
  });
 });

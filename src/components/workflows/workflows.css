@@ -50,3 +50,6 @@
 .sim-foot button.primary{background:#043F4E;border-color:#043F4E;color:#fff}
 .sim-foot button:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:600px){.sim-head,.sim-steps,.sim-body,.sim-foot{padding-left:18px;padding-right:18px}}
+.sim-total-linha{display:flex;justify-content:space-between;gap:12px;margin:0 0 6px;font:600 12px Manrope;color:#aec8c8}
+.sim-total-linha b{color:#fff;font-weight:700}
+.sim-alerta.destaque{color:#8a6d1f;background:#fcf6e4;border:1px solid #e8d79a;border-radius:8px;padding:10px 12px;font-weight:600}

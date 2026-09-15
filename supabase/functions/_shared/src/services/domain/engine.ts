@@ -1,6 +1,7 @@
 import { COLLECTIONS, type Actor, type AppState, type CollectionName, type Command, type Entity, type JsonValue, type Step, type Stage } from '../../types/domain.ts';
 import { makeEntity } from './seed.ts';
 import { calculatePrice, toCents, type PriceInput } from './pricing.ts';
+import { SITUACOES_BLOQUEADAS, SITUACOES_PRECO, type SituacaoPreco } from './servicos.ts';
 import { createProcessStages, requiresApproval, taskSteps, TASK_MODELS } from './templates.ts';
 import { CANAIS_ATENDIMENTO, CLASSIFICACOES_LEAD, DEMANDAS_ATENDIMENTO, DIAS_VENCIMENTO, FORMAS_ASSINATURA, ORIGENS_LEAD, SISTEMAS_ONBOARDING, STATUS_ATENDIMENTO, STATUS_CONTRATO, STATUS_ONBOARDING_EXTERNO, STATUS_PROPOSTA, VINCULOS_CONVERSA } from './catalogos.ts';
 export class DomainError extends Error { readonly code='VALIDATION'; constructor(message:string){super(message);this.name='DomainError';} }
@@ -104,6 +105,11 @@ function ensureDependencies(state:AppState,task:Entity):void {
  if(['fiscal','folha','prolabore'].includes(model)&&!cleared('coleta'))fail('Conclua a Coleta de documentos da mesma competência ou registre uma justificativa.');
  if(model==='contabil') {if(!cleared('fiscal'))fail('Conclua o Fechamento Fiscal da mesma competência.');const client=find(state,'clientes',task.clienteId);const configured=list(client.recorrencias);const needsPayroll=Number(client.funcionarios)>0||client.proLabore===true||Number(client.proLabore)>0||configured.some(item=>['folha','prolabore'].includes(String(item.modeloId)));if(needsPayroll&&!cleared('folha')&&!cleared('prolabore'))fail('Conclua o Fechamento de Folha ou de pró-labore da mesma competência.');}
 }
+/** Serviço aguardando preço ou desativado não entra em proposta nem simulação. */
+function assertServicoVendavel(service:Entity):void {
+ const situacao=text(service.situacaoPreco) as SituacaoPreco;
+ if(situacao&&SITUACOES_BLOQUEADAS.includes(situacao))fail(`${text(service.nome)||'Este serviço'} está como "${situacao}" e não pode entrar em proposta.`);
+}
 function validateEntity(state:AppState,collection:CollectionName,item:Entity,actor:Actor):void {
  references(state,item);
  for(const key of ['valor','honorario','valorPago','preco','custoMensal','salarioMinimo','salarioMaximo']) if(item[key]!==undefined&&item[key]!==null&&item[key]!=='') amount(item[key],key);
@@ -123,9 +129,15 @@ function validateEntity(state:AppState,collection:CollectionName,item:Entity,act
  if(collection==='documentos'){requireFields(item,['nome','tipo']);if(item.url&&!/^https:\/\//i.test(text(item.url)))fail('Use um link HTTPS válido para o documento.');}
  if(collection==='faturas'){requireFields(item,['clienteId','competencia','vencimento','status']);amount(item.valor,'Valor da fatura',true);if(item.status==='Paga') {date(item.dataPagamento,'Data de pagamento');requireFields(item,['formaPagamento']);}}
  if(collection==='despesas'){requireFields(item,['fornecedor','categoria','vencimento','status']);amount(item.valor,'Valor da despesa',true);if(item.status==='Paga') date(item.dataPagamento,'Data de pagamento');}
- if(collection==='servicos'){requireFields(item,['nome','departamento']);amount(item.valor,'Preço do serviço');}
+ if(collection==='servicos'){
+  requireFields(item,['nome','departamento']);amount(item.valor,'Preço do serviço');
+  optionalOneOf(item.situacaoPreco,SITUACOES_PRECO,'Situação do preço do serviço');
+  // Valor zero nunca é gratuito por omissão. Exige classificação explícita.
+  if(Number(item.valor??0)===0&&!text(item.situacaoPreco))fail('Serviço sem preço exige classificação: incluído no plano, cortesia com aprovação do sócio, aguardando definição de preço ou desativado.');
+  if(text(item.situacaoPreco)==='Cortesia com aprovação do sócio'&&actorRole(actor)!=='socio')fail('Somente o sócio classifica um serviço como cortesia.');
+ }
  if(collection==='equipe') requireFields(item,['nome']);
- if(collection==='propostas'){requireFields(item,['leadId','plano','validade','condicaoPagamento','responsavelId']);amount(item.valor,'Valor da proposta');optionalOneOf(item.status,STATUS_PROPOSTA,'Situação da proposta');for(const extra of list(item.extras)){const service=find(state,'servicos',extra.servicoId);if(service.ativo===false)fail('Serviço inativo não pode entrar em proposta.');if(Number(service.valor)===0&&!(actorRole(actor)==='socio'&&extra.aprovacaoSocio===true))fail('Serviço sem preço exige aprovação explícita do sócio.');}}
+ if(collection==='propostas'){requireFields(item,['leadId','plano','validade','condicaoPagamento','responsavelId']);amount(item.valor,'Valor da proposta');optionalOneOf(item.status,STATUS_PROPOSTA,'Situação da proposta');for(const extra of list(item.extras)){const service=find(state,'servicos',extra.servicoId);if(service.ativo===false)fail('Serviço inativo não pode entrar em proposta.');assertServicoVendavel(service);if(Number(service.valor)===0&&!(actorRole(actor)==='socio'&&extra.aprovacaoSocio===true))fail('Serviço sem preço exige aprovação explícita do sócio.');}}
  if(collection==='irpf'){requireFields(item,['clienteId','situacao']);if(item.preco!==undefined)amount(item.preco,'Preço do IRPF');}
  if(collection==='configuracoes') requireFields(item,['nome','tipo']);
  if(collection==='planosContabeis'){
@@ -225,7 +237,7 @@ function save(state:AppState,command:Command,actor:Actor,now:string):void {
  if(collection==='integracoes'&&item.status==='Ativa'&&previous?.status!=='Ativa')fail('Uma integração só pode ficar ativa após teste de conexão pelo servidor.');
  if(collection==='servicos'){const changed=previous&&previous.valor!==item.valor;item.versao=changed?Number(previous.versao??1)+1:Number(previous?.versao??1);item.historicoPrecos=changed?[...list(previous.historicoPrecos),{versao:Number(item.versao),valor:item.valor??0,vigenteDesde:now,autorId:actor.id}]:previous?.historicoPrecos??[{versao:1,valor:item.valor??0,vigenteDesde:now}];}
  if(collection==='propostas') {
-  if(data.simulacao){const input=object(data.simulacao);const extras=list(input.extras);for(const extra of extras){const service=find(state,'servicos',extra.servicoId);if(service.ativo===false)fail('Serviço inativo não pode ser vendido.');if(Number(extra.valor)!==Number(service.valor))fail('O preço do extra deve corresponder à versão vigente do catálogo.');if(Number(service.valor)===0&&!(actorRole(actor)==='socio'&&extra.aprovacaoSocio===true))fail('Serviço zero exige aprovação do sócio.');}
+  if(data.simulacao){const input=object(data.simulacao);const extras=list(input.extras);for(const extra of extras){const service=find(state,'servicos',extra.servicoId);if(service.ativo===false)fail('Serviço inativo não pode ser vendido.');assertServicoVendavel(service);if(Number(extra.valor)!==Number(service.valor))fail('O preço do extra deve corresponder à versão vigente do catálogo.');if(Number(service.valor)===0&&!(actorRole(actor)==='socio'&&extra.aprovacaoSocio===true))fail('Serviço zero exige aprovação do sócio.');}
    const price=calculatePrice(input as unknown as PriceInput);item.valor=price.total;item.composicao=JSON.parse(JSON.stringify(price)) as JsonValue;item.versaoPreco=price.versao;item.extras=extras.map(extra=>({...extra,versaoServico:find(state,'servicos',extra.servicoId).versao??1}));}
   if(item.status==='Enviada'&&previous?.status!=='Enviada'){if(!text(item.comprovanteEnvio)&&!text(item.envioExternoId))fail('Registre o comprovante de envio antes de marcar a proposta como enviada.');item.enviadaEm=now;}
  }
@@ -427,18 +439,26 @@ function saveSimulation(state:AppState,command:Command,actor:Actor,now:string):v
  const extras=list(entrada.extras).map(extra=>{
   const service=find(state,'servicos',extra.servicoId);
   if(service.ativo===false)fail('Serviço inativo não pode entrar na simulação.');
+  assertServicoVendavel(service);
   if(Number(service.valor)===0&&!(actorRole(actor)==='socio'&&extra.aprovacaoSocio===true))fail('Serviço sem preço exige aprovação explícita do sócio.');
   // O preço do extra é congelado agora. Mudança futura no catálogo não altera esta simulação.
   return {...extra,valor:Number(service.valor??0),nome:text(service.nome),versaoServico:Number(service.versao??1)};
  });
- const price=calculatePrice({...entrada,extras} as unknown as PriceInput);
+ // Só o sócio aprova desconto acima do limite. O motor recusa sem aprovação.
+ const ajuste=object(data.ajuste);
+ const ajusteAplicado=text(ajuste.tipo)?{...ajuste,aprovadoPorId:actorRole(actor)==='socio'?(actor.memberId??actor.id):text(ajuste.aprovadoPorId)||undefined}:undefined;
+ const parametros=state.configuracoes.find(item=>item.id==='tabela-precos');
+ const price=calculatePrice({...entrada,extras,ajuste:ajusteAplicado,tabelaIndustriaAprovada:parametros?.tabelaIndustriaAprovada===true} as unknown as PriceInput);
  const item=makeEntity({
   nome:`Simulação ${text(entrada.plano)} ${now.slice(0,10)}`,
   leadId:text(data.leadId)||null,clienteId:text(data.clienteId)||null,
   responsavelId:actor.memberId??actor.id,
   entradas:JSON.parse(JSON.stringify({...entrada,extras})) as JsonValue,
   resultado:JSON.parse(JSON.stringify(price)) as JsonValue,
-  valor:price.total,versaoPreco:price.versao,observacoes:text(data.observacoes)||null,
+  valor:price.total,subtotal:price.subtotalCentavos/100,ajuste:price.ajusteCentavos/100,
+  versaoPreco:price.versao,parametrizacaoSugerida:price.parametrizacaoSugerida,
+  justificativaAjuste:text(ajuste.justificativa)||null,aprovadorAjusteId:ajusteAplicado?.aprovadoPorId??null,
+  observacoes:text(data.observacoes)||null,
   simuladaEm:now,
  },command.id??crypto.randomUUID(),now);
  authorize('simulacoes',item,actor); validateEntity(state,'simulacoes',item,actor); update(state,'simulacoes',item);
