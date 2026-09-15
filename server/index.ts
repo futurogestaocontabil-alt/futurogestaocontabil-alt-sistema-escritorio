@@ -37,6 +37,13 @@ async function readJson(req:IncomingMessage,limit=1_048_576):Promise<unknown> {
   for await (const chunk of req) { const buffer=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk as string); bytes+=buffer.length; if(bytes>limit) throw new ApiError(413,'O arquivo ou solicitação ultrapassa o limite permitido.'); chunks.push(buffer); }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown; } catch { throw new ApiError(400,'Os dados enviados estão inválidos.'); }
 }
+export function normalizePhone(value:unknown) {
+  const digits=String(value??'').split('@')[0].split(':')[0].replace(/\D/g,'');
+  if(!digits) return '';
+  if(digits.startsWith('55')&&digits.length>=12&&digits.length<=13) return digits;
+  if(digits.length===10||digits.length===11) return `55${digits}`;
+  return digits;
+}
 function canAccessVault(actor:Actor,meta?:VaultMeta) {
   if(actor.papel==='socio') return true;
   if(actor.papel!=='operacao') return false;
@@ -119,9 +126,9 @@ export async function createApp(options:ServerOptions={}) {
         const payload=await readJson(req,5_000_000); await appendFile(path.join(directory,'evolution-webhooks.jsonl'),JSON.stringify({receivedAt:new Date().toISOString(),payload})+'\n',{mode:0o600});
         const event=payload as Record<string,unknown>; const data=event.data as Record<string,unknown>|undefined; const key=data?.key as Record<string,unknown>|undefined;
         const message=data?.message as Record<string,unknown>|undefined; const conversation=typeof message?.conversation==='string'?message.conversation:typeof (message?.extendedTextMessage as Record<string,unknown>|undefined)?.text==='string'?String((message?.extendedTextMessage as Record<string,unknown>).text):'';
-        const remoteJid=typeof key?.remoteJid==='string'?key.remoteJid:''; const telefone=remoteJid.replace(/@.*/,'');
+        const remoteJid=typeof key?.remoteJid==='string'?key.remoteJid:''; const telefone=normalizePhone(remoteJid);
         if(telefone&&conversation&&(!key?.fromMe || event.event==='messages.upsert' || requestPath.endsWith('/messages-upsert'))){
-          const current=await readState(db,LOCAL_ORG_ID); const existing=current.conversas.find(item=>String(item.telefone??'')===telefone); const mensagem={id:randomUUID(),texto:conversation,autor:'cliente',criadoEm:new Date().toISOString()};
+          const current=await readState(db,LOCAL_ORG_ID); const existing=current.conversas.find(item=>normalizePhone(item.telefone)===telefone); const mensagem={id:randomUUID(),texto:conversation,autor:'cliente',criadoEm:new Date().toISOString()};
           const actor:Actor={id:'evolution-webhook',memberId:'evolution-webhook',nome:'Evolution API',email:'evolution@local',papel:'socio',departamentos:['Atendimento']};
           const mensagensAnteriores=Array.isArray(existing?.mensagens)?existing.mensagens:[];
           await updateState(db,LOCAL_ORG_ID,current.meta.revision,state=>runCommand(state,{type:'save',collection:'conversas',id:existing?.id??`whatsapp-${telefone}`,data:{telefone,status:'Não iniciado',origem:'WhatsApp',mensagens:[...mensagensAnteriores,mensagem]}},actor));
@@ -175,11 +182,11 @@ export async function createApp(options:ServerOptions={}) {
       }
       if(requestPath==='/api/whatsapp/send'&&req.method==='POST') {
         const body=await readJson(req) as {telefone?:unknown;text?:unknown};
-        const telefone=String(body.telefone??'').replace(/\D/g,''); const message=String(body.text??'').trim();
+        const telefone=normalizePhone(body.telefone); const message=String(body.text??'').trim();
         if(!telefone||!message) throw new ApiError(400,'Informe o telefone e a mensagem.');
         const credentials=await whatsappCredentials(orgId);if(!credentials)throw new ApiError(400,'Cadastre primeiro a Evolution API.');
         await evolution(credentials,`/message/sendText/${encodeURIComponent(credentials.instanceName)}`,'POST',{number:telefone,text:message});
-        const current=await readState(db,orgId);const existing=current.conversas.find(item=>String(item.telefone??'').replace(/\D/g,'')===telefone);const mensagens=Array.isArray(existing?.mensagens)?existing.mensagens:[];
+        const current=await readState(db,orgId);const existing=current.conversas.find(item=>normalizePhone(item.telefone)===telefone);const mensagens=Array.isArray(existing?.mensagens)?existing.mensagens:[];
         await updateState(db,orgId,current.meta.revision,state=>runCommand(state,{type:'save',collection:'conversas',id:existing?.id??`whatsapp-${telefone}`,data:{telefone,status:'Em atendimento',origem:'WhatsApp',mensagens:[...mensagens,{id:randomUUID(),texto:message,autor:'equipe',criadoEm:new Date().toISOString()}]}},actor));
         await audit(actor,'whatsapp_message_sent',telefone);send(res,200,{sent:true});return;
       }
@@ -198,8 +205,8 @@ export async function createApp(options:ServerOptions={}) {
       }
       if(requestPath==='/api/state'&&req.method==='GET') {
         const current=await readState(db,orgId); const webhookPath=path.join(directory,'evolution-webhooks.jsonl');
-        try { const lines=(await readFile(webhookPath,'utf8')).split(/\r?\n/).filter(Boolean).slice(-200); for(const line of lines){ const event=JSON.parse(line).payload as Record<string,unknown>; const data=event.data as Record<string,unknown>|undefined; const key=data?.key as Record<string,unknown>|undefined; const message=data?.message as Record<string,unknown>|undefined; const textValue=typeof message?.conversation==='string'?message.conversation:''; const phone=typeof key?.remoteJid==='string'?key.remoteJid.replace(/@.*/,''):''; if(phone&&textValue&&!current.conversas.some(item=>String(item.telefone??'')===phone)){ current.conversas.push({id:`whatsapp-${phone}`,telefone:phone,origem:'WhatsApp',status:'Não iniciado',mensagens:[{id:randomUUID(),autor:'cliente',texto:textValue,criadoEm:new Date().toISOString()}],createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); } } } catch { /* arquivo de eventos pode ainda não existir */ }
-        const visible=filterStateForActor(current,actor); console.info(`[state] conversas=${visible.conversas.length}`); send(res,200,{actor,state:visible});return;
+        try { const lines=(await readFile(webhookPath,'utf8')).split(/\r?\n/).filter(Boolean).slice(-200); for(const line of lines){ const event=JSON.parse(line).payload as Record<string,unknown>; const data=event.data as Record<string,unknown>|undefined; const key=data?.key as Record<string,unknown>|undefined; const message=data?.message as Record<string,unknown>|undefined; const textValue=typeof message?.conversation==='string'?message.conversation:''; const phone=normalizePhone(key?.remoteJid); if(phone&&textValue&&!current.conversas.some(item=>normalizePhone(item.telefone)===phone)){ current.conversas.push({id:`whatsapp-${phone}`,telefone:phone,origem:'WhatsApp',status:'Não iniciado',mensagens:[{id:randomUUID(),autor:'cliente',texto:textValue,criadoEm:new Date().toISOString()}],createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); } } } catch { /* arquivo de eventos pode ainda não existir */ }
+        const visible=filterStateForActor(current,actor); send(res,200,{actor,state:visible});return;
       }
       if(requestPath==='/api/command'&&req.method==='POST') {
         const body=commandBodySchema.parse(await readJson(req));
