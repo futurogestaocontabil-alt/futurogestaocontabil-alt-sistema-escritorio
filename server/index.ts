@@ -132,7 +132,12 @@ export async function createApp(options:ServerOptions={}) {
     const configurado=await lerSegredo<{webhookToken?:string}>(LOCAL_ORG_ID,integracao);
     const esperado=String(configurado?.webhookToken??'');
     if(!esperado)return;
-    const recebido=String(req.headers['x-webhook-token']??req.headers['x-hub-signature']??'');
+    // O cabeçalho é o caminho preferido. A Autentique só permite cabeçalho
+    // personalizado no plano Pro, então o token também é aceito na própria URL,
+    // em ?token= ou ?webhookToken=. É mais fraco, porque URL costuma aparecer em
+    // log de proxy, mas é muito melhor que rota aberta.
+    const naUrl=new URL(req.url??'/','http://local').searchParams;
+    const recebido=String(req.headers['x-webhook-token']??req.headers['x-hub-signature']??naUrl.get('token')??naUrl.get('webhookToken')??'');
     if(!recebido||!tokenConfere(esperado,recebido))throw new ApiError(401,'Webhook sem token válido.');
   };
   /**

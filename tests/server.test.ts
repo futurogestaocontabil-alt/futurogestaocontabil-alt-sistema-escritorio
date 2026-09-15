@@ -158,6 +158,14 @@ describe.sequential('Servidor autenticado e persistência PostgreSQL',()=>{
   expect(semToken.status).toBe(401);
   const comToken=await fetch(`${base}/api/webhooks/autentique`,{method:'POST',headers:{'Content-Type':'application/json','x-webhook-token':'webhook-autentique-teste'},body:JSON.stringify({event:'document.signed',document:{id:'doc-inexistente'}})});
   expect(comToken.status).toBe(202);
+  // A Autentique só envia cabeçalho personalizado no plano Pro, então o token
+  // também vale na URL. É o caminho que funciona no plano atual.
+  const naUrl=await fetch(`${base}/api/webhooks/autentique?token=webhook-autentique-teste`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'document.signed',document:{id:'doc-inexistente'}})});
+  expect(naUrl.status).toBe(202);
+  const urlErrada=await fetch(`${base}/api/webhooks/autentique?token=valor-errado-qualquer`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'document.signed',document:{id:'doc-inexistente'}})});
+  expect(urlErrada.status).toBe(401);
+  const evolutionNaUrl=await fetch(`${base}/api/webhooks/evolution/messages-upsert?token=nao-configurado-ainda`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'messages.upsert',data:{key:{remoteJid:'5562977770000@s.whatsapp.net',fromMe:false,id:'sem-token-evolution'},message:{conversation:'Evolution segue aberta sem token configurado'}}})});
+  expect(evolutionNaUrl.status).toBe(202);
  });
  it('armazena arquivos privados e impede metadados de upload forjados',async()=>{
   const upload=await request('/api/documents',{name:'verificacao.txt',mimeType:'text/plain',contentBase64:Buffer.from('Documento exclusivo do teste').toString('base64'),tipo:'Protocolo',departamento:'Fiscal'});

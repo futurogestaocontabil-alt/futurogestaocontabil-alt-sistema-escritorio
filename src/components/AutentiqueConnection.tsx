@@ -49,7 +49,7 @@ export default function AutentiqueConnection() {
         <label className="field"><span>Token da API *</span><input name="token" type="password" required minLength={20} autoComplete="off" placeholder="Cole o token gerado na Autentique"/>
           <small>Guardado cifrado. Não aparece mais depois de salvo.</small></label>
         <label className="field"><span>Token do webhook</span><input name="webhookToken" type="password" minLength={16} autoComplete="off" placeholder="Pelo menos 16 caracteres"/>
-          <small>Cadastre o mesmo valor na Autentique, no cabeçalho x-webhook-token. Sem ele a rota de retorno fica aberta.</small></label>
+          <small>No plano Pro da Autentique, cadastre no cabeçalho x-webhook-token. Nos demais planos, acrescente <code>?token=SEU_TOKEN</code> ao final da URL do webhook. Sem token a rota de retorno fica aberta.</small></label>
         <label className="wf-toggle"><input type="checkbox" name="sandbox"/>Ambiente de testes</label>
       </div>
       <div className="wf-inline-actions">
@@ -57,6 +57,7 @@ export default function AutentiqueConnection() {
         <button type="button" className="button button-secondary" disabled={ocupado || !situacao?.configured} onClick={() => void carregar(true)}><ShieldCheck size={15}/>Testar conexão</button>
       </div>
       {situacao?.detalhe ? <p className="wf-muted" style={{ marginTop: 12 }}>{situacao.detalhe}</p> : null}
+      <p className="wf-muted">URL do webhook, quando houver endereço público: <code>https://SEU-DOMINIO/api/webhooks/autentique?token=SEU_TOKEN</code>. Enquanto o sistema rodar apenas em 127.0.0.1, a Autentique não alcança essa rota e a assinatura precisa ser registrada à mão em Contratos.</p>
       <p className="wf-muted">O formato das respostas da Autentique ainda não foi conferido com credenciais reais. Teste a conexão antes de usar em produção.</p>
     </form> : <p className="wf-muted">Somente o sócio configura integrações.</p>}
   </Card>;
