@@ -70,7 +70,7 @@ do sistema. Removido.
 
 ## Riscos abertos, por ordem de gravidade
 
-### Alto: webhook da Evolution sem autenticação
+### Resolvido em 15/09/2026: webhook da Evolution sem autenticação
 
 `POST /api/webhooks/evolution` está corretamente excluído da verificação de
 origem, porém não exige nenhum token, assinatura ou segredo compartilhado.
@@ -81,9 +81,15 @@ Hoje o servidor escuta apenas em `127.0.0.1` e o risco fica contido. No
 momento em que a Evolution API subir no Oracle Cloud e o webhook precisar de
 um endereço HTTPS público, isso vira uma rota de escrita aberta na internet.
 
-Correção necessária antes da publicação: token compartilhado no cabeçalho,
-conferido em tempo constante, com o segredo guardado no cofre e configurado
-também no lado da Evolution.
+**Corrigido.** O webhook aceita um token compartilhado, guardado no cofre junto
+com as credenciais e conferido em tempo constante. Enquanto não houver token
+cadastrado a rota segue aberta, porque o servidor só escuta em 127.0.0.1.
+Basta cadastrar o token dos dois lados para fechá-la, sem mudar código.
+
+Na mesma correção apareceu um segundo defeito: a isenção da exigência de origem
+valia apenas para o caminho da Evolution. Serviço externo não envia Origin,
+então qualquer outro webhook seria recusado antes de chegar na conferência do
+token. A isenção passou a valer para todo webhook.
 
 ### Alto: organização fixa no webhook
 
@@ -92,11 +98,11 @@ Supabase existe, mas o webhook não sabe distinguir instâncias. Enquanto o uso
 for de um único escritório não há impacto. Vira defeito no dia em que houver
 mais de uma organização ou mais de um número conectado.
 
-### Médio: mensagens de grupo tratadas como cliente
+### Resolvido em 15/09/2026: mensagens de grupo tratadas como cliente
 
-O webhook aceita qualquer `remoteJid`, inclusive `@g.us`, que identifica
-grupo. Um grupo vira uma conversa com um telefone inexistente na caixa de
-entrada. Depende de decisão de negócio no Bloco 9.
+O webhook aceitava qualquer `remoteJid`, inclusive `@g.us`, que identifica
+grupo. **Corrigido:** mensagem de grupo não cria conversa de cliente, nem pelo
+webhook nem pela releitura do arquivo de eventos.
 
 ### Médio: divergência entre documentação e implementação
 
