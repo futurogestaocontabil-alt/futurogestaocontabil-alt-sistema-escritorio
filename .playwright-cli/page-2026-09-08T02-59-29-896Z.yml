@@ -1,0 +1,25 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - img "Futuro Contabilidade Digital" [ref=e5]
+    - generic [ref=e6]: PLATAFORMA FUTURO
+    - heading "Seu escritório. Uma visão completa." [level=1] [ref=e7]: Seu escritório.Uma visão completa.
+    - paragraph [ref=e8]: Clientes, prazos e decisões no mesmo lugar. Mais clareza para cuidar do que vem pela frente.
+    - generic [ref=e9]:
+      - generic [ref=e10]: Operação conectada
+      - generic [ref=e15]: Acesso protegido
+    - generic [ref=e19]: Futuro Contabilidade Digital
+  - generic [ref=e20]:
+    - generic [ref=e21]:
+      - text: BEM-VINDO À SUA PLATAFORMA
+      - heading "Bom ter você de volta." [level=2] [ref=e27]
+      - paragraph [ref=e28]: Entre para acompanhar seu escritório.
+      - generic [ref=e29]:
+        - generic [ref=e30]:
+          - text: E-mail
+          - textbox "E-mail" [active] [ref=e31]
+        - generic [ref=e32]:
+          - text: Senha
+          - textbox "Senha" [ref=e33]
+        - button "Entrar na plataforma" [ref=e34] [cursor=pointer]
+      - generic [ref=e37]: Ambiente local · dados salvos neste computador
+    - generic [ref=e39]: Organização para hoje. Visão para o futuro.
