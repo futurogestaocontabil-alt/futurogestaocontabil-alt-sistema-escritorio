@@ -2,6 +2,7 @@ import { COLLECTIONS, type Actor, type AppState, type CollectionName, type Comma
 import { makeEntity } from './seed.ts';
 import { calculatePrice, toCents, type PriceInput } from './pricing.ts';
 import { SITUACOES_BLOQUEADAS, SITUACOES_PRECO, type SituacaoPreco } from './servicos.ts';
+import { MODELO_CONTRATO, MODELO_CONTRATO_VERSAO, pendenciasDoModelo } from './modelosDocumento.ts';
 import { createProcessStages, requiresApproval, taskSteps, TASK_MODELS } from './templates.ts';
 import { CANAIS_ATENDIMENTO, CLASSIFICACOES_LEAD, DEMANDAS_ATENDIMENTO, DIAS_VENCIMENTO, FORMAS_ASSINATURA, ORIGENS_LEAD, SISTEMAS_ONBOARDING, STATUS_ATENDIMENTO, STATUS_CONTRATO, STATUS_ONBOARDING_EXTERNO, STATUS_PROPOSTA, VINCULOS_CONVERSA } from './catalogos.ts';
 export class DomainError extends Error { readonly code='VALIDATION'; constructor(message:string){super(message);this.name='DomainError';} }
@@ -468,7 +469,22 @@ function saveSimulation(state:AppState,command:Command,actor:Actor,now:string):v
 // ---------------------------------------------------------------------------
 // Contrato gerado a partir da proposta aceita, assinatura e ativação.
 // ---------------------------------------------------------------------------
-const CAMPOS_OBRIGATORIOS_CONTRATO=['razaoSocial','cnpj','endereco','cidade','uf','representanteLegal','cpfRepresentante','email','atividade','regime'] as const;
+/**
+ * Junta o que o modelo precisa: dados do escritório vindos de configurações,
+ * dados do cliente vindos do formulário e do lead, e dados do contrato.
+ * O que faltar é devolvido como lista objetiva de pendências.
+ */
+function dadosDoContrato(state:AppState,lead:Entity,informados:Record<string,JsonValue>,contrato:Record<string,JsonValue>):Record<string,string> {
+ const escritorio=state.configuracoes.find(item=>item.id==='escritorio')??{} as Entity;
+ const dados:Record<string,string>={};
+ for(const [chave,valor] of Object.entries(escritorio)) if(typeof valor==='string') dados[chave]=valor;
+ for(const campo of MODELO_CONTRATO.campos){
+  if(dados[campo.chave]) continue;
+  const valor=informados[campo.chave]??contrato[campo.chave]??lead[campo.chave]??(campo.chave==='razaoSocial'?lead.empresa:undefined);
+  if(valor!==undefined&&valor!==null&&valor!=='') dados[campo.chave]=String(valor);
+ }
+ return dados;
+}
 
 function generateContract(state:AppState,command:Command,actor:Actor,now:string):void {
  const data=object(command.data); const proposta=find(state,'propostas',text(data.propostaId)||fail('Informe a proposta.'));
@@ -476,14 +492,24 @@ function generateContract(state:AppState,command:Command,actor:Actor,now:string)
  if(state.contratos.some(item=>item.propostaId===proposta.id&&!['Recusado','Cancelado','Expirado'].includes(String(item.status))))fail('Já existe contrato vigente para esta proposta.');
  const lead=find(state,'leads',proposta.leadId);
  const dados=object(data.dados);
- const faltando=CAMPOS_OBRIGATORIOS_CONTRATO.filter(campo=>!text(dados[campo])&&!text(lead[campo]));
- if(faltando.length)fail(`Complete os dados obrigatórios do contrato: ${faltando.join(', ')}.`);
  const diaVencimento=Number(data.diaVencimento??30);
+ const numeroContrato=`${new Date(now).getFullYear()}-${String(state.contratos.length+1).padStart(4,'0')}`;
+ const contratoParcial:Record<string,JsonValue>={
+  numeroContrato,numeroProposta:text(proposta.numero)||proposta.id,versaoProposta:String(proposta.versao??1),
+  dataContrato:now.slice(0,10),dataInicio:text(data.dataInicio)||now.slice(0,10),
+  plano:text(proposta.plano),valorMensal:String(proposta.valor??''),
+  servicosContratados:text(data.servicosContratados)||`Plano ${text(proposta.plano)}`,
+  diaVencimento:String(diaVencimento),avisoPrevioDias:String(data.avisoPrevioDias??45),
+ };
+ const dadosCompletos=dadosDoContrato(state,lead,dados,contratoParcial);
+ const faltando=pendenciasDoModelo(MODELO_CONTRATO,dadosCompletos);
+ if(faltando.length)fail(`Complete antes de gerar o contrato: ${faltando.join('; ')}.`);
  const item=makeEntity({
   nome:`Contrato ${text(dados.razaoSocial)||text(lead.empresa)||text(lead.nome)}`,
   propostaId:proposta.id,leadId:lead.id,clienteIdOuLead:lead.id,clienteId:null,
   responsavelId:actor.memberId??actor.id,
-  status:'Gerado',modeloVersao:text(data.modeloVersao)||'contrato-v1',
+  numeroContrato,status:'Gerado',modeloVersao:text(data.modeloVersao)||MODELO_CONTRATO_VERSAO,
+  dadosGerados:JSON.parse(JSON.stringify(dadosCompletos)) as JsonValue,geradoPorId:actor.memberId??actor.id,geradoEm:now,
   dados:JSON.parse(JSON.stringify({...dados,plano:proposta.plano,servicosExtras:proposta.extras??[]})) as JsonValue,
   honorario:Number(proposta.valor??0),diaVencimento,
   competenciaInicial:text(data.competenciaInicial)||now.slice(0,7),

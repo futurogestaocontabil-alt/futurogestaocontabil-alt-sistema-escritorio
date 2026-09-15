@@ -94,11 +94,9 @@ export const CATALOGO_SERVICOS: readonly ServicoCatalogo[] = [
  s('Processo administrativo federal, estadual ou municipal', 350, 'Paralegal e Legalização'),
 
  // Alvarás e licenças
- // ATENÇÃO: "Alvará de localização" veio duas vezes na parametrização, com
- // R$ 600,00 e R$ 500,00. As duas entradas ficam registradas até Gilmar
- // resolver qual vale, para não inventar preço.
- { nome: 'Alvará de localização (R$ 600,00, a confirmar)', valor: 600, departamento: 'Paralegal e Legalização', situacaoPreco: 'Aguardando definição de preço' },
- { nome: 'Alvará de localização (R$ 500,00, a confirmar)', valor: 500, departamento: 'Paralegal e Legalização', situacaoPreco: 'Aguardando definição de preço' },
+ // A parametrização trouxe "Alvará de localização" duas vezes, com R$ 600,00 e
+ // R$ 500,00. Gilmar resolveu em 15/09/2026: vale R$ 500,00, entrada única.
+ s('Alvará de localização', 500, 'Paralegal e Legalização'),
  s('Alvará e licenças de bombeiros', 150, 'Paralegal e Legalização'),
  s('Alvará e licenças de meio ambiente', 2000, 'Paralegal e Legalização'),
  s('Alvará de vigilância sanitária', 500, 'Paralegal e Legalização'),

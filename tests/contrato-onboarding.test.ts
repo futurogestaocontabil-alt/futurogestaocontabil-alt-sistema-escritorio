@@ -9,13 +9,16 @@ const operacao:Actor={id:'daniel',memberId:'daniel',nome:'Daniel',email:'d@examp
 const run=(state:AppState,command:Command,actor:Actor=socio)=>runCommand(state,command,actor);
 const first=(state:AppState,collection:'contratos'|'simulacoes'|'clientes'|'onboardings'|'faturas'):Entity=>state[collection][0];
 
-const DADOS_CONTRATO={razaoSocial:'Empresa Teste LTDA',cnpj:'41571817000105',endereco:'Rua de teste, 100',cidade:'Goiânia',uf:'GO',representanteLegal:'Representante de Teste',cpfRepresentante:'00000000191',email:'contato@example.test',atividade:'Serviços',regime:'Simples Nacional'};
+const DADOS_CONTRATO={razaoSocial:'Empresa Teste LTDA',cnpj:'41571817000105',endereco:'Rua de teste, 100',cidade:'Goiânia',uf:'GO',cep:'74000-000',telefone:'(62) 3000-0000',representanteLegal:'Representante de Teste',cpfRepresentante:'00000000191',email:'contato@example.test',atividade:'Serviços',regime:'Simples Nacional'};
+/** Dados fictícios do escritório, só para o teste. Nada real entra aqui. */
+const ESCRITORIO={escritorioRazaoSocial:'Escritório de Teste LTDA',escritorioCnpj:'00000000000191',escritorioEndereco:'Rua do Teste, 1',escritorioCidade:'Trindade',escritorioUf:'GO',escritorioCep:'75380-000',escritorioTelefone:'(62) 90000-0000',escritorioEmail:'teste@example.test',contadorNome:'Contador de Teste',contadorCpf:'00000000272',contadorCrc:'GO-000000/O',escritorioForo:'Comarca de Trindade'};
+const comEscritorio=(state:AppState):AppState=>run(state,{type:'save',collection:'configuracoes',id:'escritorio',data:{tipo:'escritorio',nome:'Dados do escritório para documentos',...ESCRITORIO}});
 
 function comLead():AppState {
- return run(createInitialState(),{type:'save',collection:'leads',id:'lead-a',data:{
+ return comEscritorio(run(createInitialState(),{type:'save',collection:'leads',id:'lead-a',data:{
   nome:'Contato do teste',empresa:'Empresa Teste LTDA',cnpj:'41571817000105',origem:'BNI',canal:'WhatsApp',
   responsavelId:'tamires',atividade:'Serviços',cidade:'Goiânia',uf:'GO',
-  motivoBusca:'Contador atual não responde',decisor:'Sim, é o sócio',classificacao:'Qualificado',etapa:'Negociação'}});
+  motivoBusca:'Contador atual não responde',decisor:'Sim, é o sócio',classificacao:'Qualificado',etapa:'Negociação'}}));
 }
 
 function comPropostaAceita():AppState {
@@ -87,7 +90,7 @@ describe('Contrato', () => {
   const state=comPropostaAceita();
   // endereco e representanteLegal não existem no lead, então os dois são cobrados.
   const {endereco:_endereco,representanteLegal:_representante,...incompleto}=DADOS_CONTRATO;
-  expect(()=>run(state,{type:'generateContract',data:{propostaId:'proposta-a',dados:incompleto}})).toThrow(/endereco, representanteLegal/);
+  expect(()=>run(state,{type:'generateContract',data:{propostaId:'proposta-a',dados:incompleto}})).toThrow(/Endereço completo; Representante legal/);
  });
 
  it('completa pelo lead o dado que já foi levantado na qualificação', () => {

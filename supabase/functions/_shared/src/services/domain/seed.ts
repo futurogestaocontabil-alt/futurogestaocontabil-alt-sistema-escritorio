@@ -2,6 +2,7 @@ import { COLLECTIONS, type AppState, type Entity, type JsonValue } from '../../t
 import { PRICE_TABLES, PRICE_VERSION } from './pricing.ts';
 import { PROCESS_TEMPLATES, TASK_MODELS } from './templates.ts';
 import { CATALOGO_SERVICOS } from './servicos.ts';
+import { MODELOS_DOCUMENTO } from './modelosDocumento.ts';
 export function makeEntity(data: Record<string,JsonValue>, id: string=crypto.randomUUID(), now=new Date().toISOString()): Entity { return {...data,id,createdAt:now,updatedAt:now}; }
 export function createInitialState(organizacaoId='futuro'): AppState {
  const state = Object.fromEntries(COLLECTIONS.map(key=>[key,[]])) as unknown as AppState;
@@ -26,6 +27,19 @@ export function createInitialState(organizacaoId='futuro'): AppState {
  const mentor=[...essential.filter(item=>!item.startsWith('Suporte por e-mail')),'Suporte tributário prioritário por WhatsApp','Relatórios gerenciais','Distribuição de lucro com compliance tributário','Programa de indicação','Análise tributária com Fator R','Monitoramento fiscal e CNDs na Veri','Planejamento tributário','Treinamento de gestão financeira','Sistema de gestão financeira','Grupo exclusivo no WhatsApp'];
  state.configuracoes=[
  entity('empresa',{tipo:'empresa',nome:'Futuro Contabilidade Digital',crc:'GO-028974/O',cidade:'Goiânia',uf:'GO'}),
+ // Dados do escritório usados em proposta e contrato. Ficam vazios de
+ // propósito: são preenchidos no sistema, nunca fixados no código nem
+ // versionados no repositório, porque incluem CPF e dados de assinatura.
+ entity('escritorio',{tipo:'escritorio',nome:'Dados do escritório para documentos',
+  escritorioRazaoSocial:'',escritorioNomeFantasia:'',escritorioCnpj:'',escritorioEndereco:'',
+  escritorioCidade:'',escritorioUf:'',escritorioCep:'',escritorioTelefone:'',escritorioEmail:'',
+  contadorNome:'',contadorCpf:'',contadorCrc:'',contadorEstadoCivil:'',contadorProfissao:'',contadorEndereco:'',
+  escritorioForo:'',escritorioRodape:'',escritorioLogotipo:'/brand/Logo.png',
+  escritorioConfidencialidade:'As partes obrigam-se a manter sigilo sobre todas as informações a que tiverem acesso em razão deste contrato, durante sua vigência e após o seu término.',
+  observacoes:'Preencha estes campos antes de gerar a primeira proposta ou contrato. A geração é bloqueada enquanto faltar dado obrigatório.'}),
+ entity('modelos-documento',{tipo:'modelosDocumento',nome:'Modelos de proposta e contrato',
+  modelos:JSON.parse(JSON.stringify(MODELOS_DOCUMENTO)) as JsonValue,
+  observacoes:'Estrutura e redação vindas dos modelos oficiais. Alterar cláusula cria nova versão e exige aprovação do sócio. Documento já gerado guarda a versão que usou.'}),
  entity('tabela-precos',{tipo:'precos',nome:'Tabela comercial',versao:PRICE_VERSION,tabelas:JSON.parse(JSON.stringify(PRICE_TABLES)) as JsonValue,industriaDisponivel:true,tabelaIndustriaAprovada:false,descontoMaximoSemAprovacao:10,observacoes:'A tabela de Indústria é parametrização comercial sugerida em 15/09/2026 e depende de aprovação do sócio. Faturamento além da última faixa de Serviços e Comércio ainda exige parametrização. Tabela comercial, não tributária.'}),
  entity('limite-ticket',{tipo:'parametro',nome:'Limite de ticket alto',valor:null,unidade:'honorário mensal em reais',parceiro:'Mister Contador',observacoes:'Enquanto o sócio não definir o valor, a classificação de ticket alto é marcada à mão na ativação do cliente. Nenhum limite foi fixado no código.'}),
  entity('planos',{tipo:'planos',nome:'Entregáveis por plano',Essencial:essential,Mentor:mentor,'Estratégico':[...mentor,'Reunião mensal de resultados de 1 hora','Análise de precificação','Suporte por telefone','Treinamento de processos','Planejamento financeiro','Escritório virtual incluso']}),
