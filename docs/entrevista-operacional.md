@@ -7,13 +7,13 @@ Processo não confirmado fica marcado como **não definido** e não vira código
 |---|---|---|
 | 1 | Estrutura do escritório | Respondido em 15/09/2026 |
 | 2 | Entrada de leads | Fechado em 15/09/2026 |
-| 3 | Reunião comercial | Respondido em 15/09/2026, 5 itens não definidos |
-| 4 | Conversão em cliente | Aguardando |
+| 3 | Reunião comercial | Ratificado em 15/09/2026, 4 itens não definidos |
+| 4 | Conversão em cliente | Respondido em 15/09/2026 |
 | 5 | Cadastro do cliente | Aguardando |
-| 6 | Onboarding | Aguardando |
+| 6 | Onboarding | Parcial, ver docs/processo-comercial-ao-onboarding.md |
 | 7 | Operação contábil | Aguardando |
 | 8 | Tarefas recorrentes | Aguardando |
-| 9 | WhatsApp e atendimento | Aguardando |
+| 9 | WhatsApp e atendimento | Parcial, modelo definido em docs/processo-comercial-ao-onboarding.md |
 | 10 | Financeiro | Aguardando |
 | 11 | Contábil | Aguardando |
 | 12 | Publicação | Aguardando |
@@ -398,3 +398,100 @@ mensagem e configurações de atendimento.
 Não foram observadas por dentro as telas de Departamentos, Demandas, Tags,
 Jornadas, Tarefas e Ordens de Serviço. Se forem necessárias, pedir novas
 capturas no Bloco 9.
+
+## Bloco 1: decisões fechadas em 15/09/2026
+
+**1.A. Acesso de Daniel.** Daniel acessa o financeiro somente quando houver
+necessidade operacional. Honorários, inadimplência e valores negociados ficam
+com Gilmar e Tamires. **Acesso comercial amplo de Daniel continua não
+definido.**
+
+Consequência técnica: o modelo atual é binário por departamento. "Somente
+quando houver necessidade operacional" não existe como regra. É preciso
+escolher entre não dar o departamento Financeiro a Daniel, criar um acesso de
+leitura restrito ou registrar liberação temporária auditada. Enquanto não
+houver escolha, Daniel fica sem o departamento Financeiro, que é o
+comportamento mais restritivo e o único seguro.
+
+**1.B. Tarefas que exigem aprovação de Gilmar antes do envio ao cliente:**
+
+1. Entregas contábeis relevantes
+2. Diagnósticos tributários
+3. Propostas comerciais
+4. Alterações de honorários
+5. Respostas sobre economia tributária
+6. Situações com risco fiscal ou jurídico
+
+As demais tarefas rotineiras são concluídas pela equipe conforme o
+departamento.
+
+Consequência técnica: `completeTask` ganha estado "Aguardando aprovação" e o
+modelo de tarefa ganha a marca de exigir aprovação. Falta definir o critério
+objetivo de "entrega contábil relevante", porque a palavra relevante não é
+programável. Sugestão a confirmar: marcar a exigência no modelo da tarefa, e
+não no julgamento de quem executa.
+
+## Bloco 3: ratificação do playbook em 15/09/2026
+
+1. Roteiro de sete etapas mantido como base.
+2. Perguntas e quebras de objeção ficam como **roteiro sugerido**, não como
+   processo obrigatório, até serem validadas em reuniões reais.
+3. Classificação do lead permanece manual. A pontuação pode aparecer como
+   lembrete visual e nunca decide aceitar ou recusar.
+4. Situação do lead usa apenas quatro valores: Qualificado, Em avaliação,
+   Não qualificado e Perdido.
+5. Agendamento não exige faturamento mínimo fixo. O parâmetro fica
+   configurável para o futuro.
+6. Seis perguntas mínimas antes de agendar, conforme já registrado.
+7. Tabela de preços preservada.
+8. Indústria continua bloqueada até a tabela ser definida.
+9. Serviço extra sem preço exige aprovação de Gilmar.
+10. Desconto permanece não definido.
+
+Pendências do Bloco 3 que continuam abertas: 3.A participação de Daniel ou
+Tamires na reunião, 3.B percentual máximo de desconto, 3.C formato principal de
+envio da proposta e 3.D cadência de follow-up.
+
+O item 3.E fica resolvido: o playbook está ratificado como roteiro sugerido.
+Gilmar revisará as perguntas e etapas depois de algumas reuniões reais.
+
+## Bloco 4: conversão em cliente
+
+**Momento da conversão.** O lead vira cliente com contrato assinado e
+confirmação da contratação. Aceite verbal, aceite de proposta e primeiro
+pagamento não convertem. O primeiro pagamento é registrado antes do início
+efetivo da execução, salvo exceção aprovada por Gilmar.
+
+**Documentos mínimos:** CNPJ ou documento de abertura, contrato social ou
+requerimento de empresário, documento dos sócios ou representante legal,
+certificado digital quando aplicável, acessos e procurações, dados bancários e
+financeiros, e documentos fiscais e contábeis da competência inicial.
+
+**Dados obrigatórios antes de ativar:** razão social, CNPJ, atividade, regime
+tributário, endereço, responsável interno, plano contratado, honorário, dia de
+vencimento, representante legal, competência inicial e recorrências revisadas.
+
+**Conferência.** Gilmar confere a ativação final. Tamires confere documentos e
+pendências administrativas. Daniel confere informações operacionais contábeis,
+fiscais e de pessoal quando necessário.
+
+**Contrato.** Montado inicialmente por Gilmar. A geração automática a partir do
+cadastro entra em etapa posterior. Enviado por Gilmar ou Tamires.
+
+**Assinatura.** Preferencialmente digital, pela Autentique. Papel e WhatsApp
+são exceção e devem ser registrados como tal.
+
+**Início da cobrança.** Ver a contradição registrada como item 5.A em
+`docs/processo-comercial-ao-onboarding.md`. O sistema precisa permitir
+configurar mês de início, pró-rata e primeiro vencimento.
+
+**Onboarding.** Começa após contrato assinado e confirmação da contratação. A
+execução operacional completa começa após a confirmação do primeiro pagamento,
+salvo aprovação de Gilmar.
+
+**Tarefas criadas na ativação:** boas-vindas, coleta de documentos,
+solicitação de acessos, conferência cadastral, configuração financeira,
+recorrentes aplicáveis ao regime e onboarding dos primeiros 90 dias.
+
+O detalhamento completo do onboarding interno e externo está em
+`docs/processo-comercial-ao-onboarding.md`.
