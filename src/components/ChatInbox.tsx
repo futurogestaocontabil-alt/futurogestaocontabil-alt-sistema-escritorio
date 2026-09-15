@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowRightLeft, CheckCheck, CheckCircle2, ClipboardList, Link2, Paperclip, Phone, Search, Send, Smile, Smartphone, UserRound, X } from 'lucide-react';
+import { ArrowLeft, ArrowRightLeft, CheckCheck, CheckCircle2, ClipboardList, IdCard, Link2, Paperclip, Phone, Search, Send, Smile, Smartphone, UserRound, X } from 'lucide-react';
 import { useApp } from '../hooks/useApp';
 import { DEMANDAS_ATENDIMENTO, DEPARTAMENTOS } from '../services/domain/catalogos';
 import type { Entity } from '../types/domain';
@@ -25,11 +25,14 @@ export default function ChatInbox() {
   const { state, actor, execute, busy, notice } = useApp();
   const [selectedId, setSelectedId] = useState('');
   const [query, setQuery] = useState('');
-  const [fila, setFila] = useState<Fila>('Ativos');
+  const [filaEscolhida, setFilaEscolhida] = useState<Fila | null>(null);
   const [verDeTodos, setVerDeTodos] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [painel, setPainel] = useState<'transferir' | 'finalizar' | 'tarefa' | 'vincular' | null>(null);
+  /** Em tela estreita a lista e a conversa ocupam a mesma área, uma de cada vez. */
+  const [conversaAberta, setConversaAberta] = useState(false);
+  const [contatoAberto, setContatoAberto] = useState(false);
 
   const eu = actor.memberId || actor.id;
   const atendimentoDe = (conversaId: string) => state.atendimentos.find(item => item.conversaId === conversaId && item.status !== 'Finalizado');
@@ -49,6 +52,11 @@ export default function ChatInbox() {
     return !atendimento || !atendimento.responsavelId || atendimento.responsavelId === eu;
   };
   const contagem = (alvo: Fila) => state.conversas.filter(item => naFila(item, alvo) && (verDeTodos || minha(item))).length;
+  /**
+   * Enquanto ninguém escolheu fila, abre na primeira que tiver conversa. Abrir
+   * sempre em Ativos fazia a tela aparecer vazia mesmo havendo gente na fila.
+   */
+  const fila: Fila = filaEscolhida ?? FILAS.find(item => contagem(item) > 0) ?? 'Ativos';
 
   const lista = useMemo(() => state.conversas
     .filter(item => naFila(item, fila))
@@ -83,7 +91,7 @@ export default function ChatInbox() {
     finally { setSending(false); }
   };
 
-  return <section className="chat-inbox">
+  return <section className={'chat-inbox ' + (conversaAberta ? 'mostra-conversa' : 'mostra-lista')}>
     <aside className="chat-sidebar">
       <div className="chat-sidebar-head"><strong>Atendimento</strong>
         <label className="chat-toggle"><input type="checkbox" checked={verDeTodos} onChange={event => setVerDeTodos(event.target.checked)}/> Ver de todos</label>
@@ -91,13 +99,13 @@ export default function ChatInbox() {
       <label className="chat-search"><Search size={16}/><input aria-label="Pesquisar conversas" placeholder="Buscar por nome, telefone ou mensagem" value={query} onChange={event => setQuery(event.target.value)}/></label>
       <div className="chat-filter" role="tablist">{FILAS.map(item => {
         const total = contagem(item);
-        return <button key={item} role="tab" aria-selected={fila === item} className={fila === item ? 'active' : ''} onClick={() => setFila(item)}>{item}{total ? <em>{total}</em> : null}</button>;
+        return <button key={item} role="tab" aria-selected={fila === item} className={fila === item ? 'active' : ''} onClick={() => setFilaEscolhida(item)}>{item}{total ? <em>{total}</em> : null}</button>;
       })}</div>
       <div className="chat-list">{lista.length ? lista.map(item => {
         const ultima = messagesOf(item).at(-1);
         const aberto = atendimentoDe(item.id);
         const naoLidas = messagesOf(item).filter(message => message.autor === 'cliente').length && !aberto;
-        return <button key={item.id} className={'chat-list-item ' + (selected?.id === item.id ? 'selected' : '')} onClick={() => { setSelectedId(item.id); setPainel(null); }}>
+        return <button key={item.id} className={'chat-list-item ' + (selected?.id === item.id ? 'selected' : '')} onClick={() => { setSelectedId(item.id); setPainel(null); setContatoAberto(false); setConversaAberta(true); }}>
           <span className="chat-avatar"><UserRound size={18}/></span>
           <span className="chat-list-copy">
             <strong>{texto(item.nome) || displayPhone(item.telefone)}</strong>
@@ -115,12 +123,14 @@ export default function ChatInbox() {
 
     <main className="chat-main">{selected ? <>
       <header className="chat-main-head">
+        <button type="button" className="chat-voltar" aria-label="Voltar para a lista de conversas" onClick={() => { setConversaAberta(false); setPainel(null); }}><ArrowLeft size={18}/></button>
         <span className="chat-avatar"><UserRound size={18}/></span>
         <div>
           <strong>{texto(cliente?.razaoSocial) || texto(cliente?.nome) || texto(selected.nome) || displayPhone(selected.telefone)}</strong>
           <small>{texto(selected.nome) ? `${texto(selected.nome)} · ` : ''}{displayPhone(selected.telefone)}{responsavel ? ` · Atend: ${texto(responsavel.nome)}` : atendimento ? ' · Na fila' : ' · Sem atendimento aberto'}</small>
         </div>
         <div className="chat-head-actions">
+          <button type="button" className="chat-contato-toggle" aria-pressed={contatoAberto} onClick={() => setContatoAberto(valor => !valor)}><IdCard size={16}/>{contatoAberto ? 'Ver conversa' : 'Contato'}</button>
           {emAndamento ? <>
             <button type="button" onClick={() => setPainel('transferir')} disabled={busy}><ArrowRightLeft size={16}/>Transferir</button>
             <button type="button" onClick={() => setPainel('tarefa')} disabled={busy}><ClipboardList size={16}/>Criar tarefa</button>
@@ -130,7 +140,7 @@ export default function ChatInbox() {
         </div>
       </header>
 
-      <div className="chat-body">
+      <div className={'chat-body ' + (contatoAberto ? 'contato-aberto' : '')}>
         <div className="chat-messages">{messagesOf(selected).map((message, index) => <div key={message.id ?? `${index}`} className={'chat-bubble ' + (message.autor === 'cliente' ? 'incoming' : 'outgoing')}>
           {message.autor !== 'cliente' && message.origem === 'Dispositivo externo' ? <em className="chat-origin"><Smartphone size={12}/> Dispositivo externo</em> : null}
           <span>{message.texto}</span>

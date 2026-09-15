@@ -33,15 +33,37 @@ const CATEGORIAS: Record<string, string> = { base: 'Faixa de faturamento', plano
 const dinheiro = (centavos: number) => (centavos / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const texto = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 
+/**
+ * O que já está no lead entra na simulação. Antes a atividade era reduzida a
+ * Comércio ou Serviços, então Indústria virava Serviços em silêncio e a tabela
+ * aplicada era a errada. Agora o valor só é aproveitado quando existe na lista,
+ * e o que não deu para aproveitar aparece na tela em vez de sumir.
+ */
+const naLista = <T extends string>(valores: readonly T[], bruto: unknown): T | undefined => {
+  const alvo = texto(bruto).toLocaleLowerCase('pt-BR');
+  return alvo ? valores.find(item => item.toLocaleLowerCase('pt-BR') === alvo) : undefined;
+};
+const numeroPositivo = (bruto: unknown): number | undefined => {
+  const valor = typeof bruto === 'number' ? bruto : Number(texto(bruto).replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(valor) && valor > 0 ? valor : undefined;
+};
+
 export default function SimulationWizard({ lead, onClose, onSaved }: { lead?: Entity; onClose: () => void; onSaved?: (valor: number) => void }) {
   const { state, actor, execute, busy, notice } = useApp();
   const [etapa, setEtapa] = useState(0);
   const [erro, setErro] = useState('');
+  const atividadeDoLead = naLista(ATIVIDADES, lead?.atividade);
+  const regimeDoLead = naLista(REGIMES, lead?.regime);
+  const faturamentoDoLead = numeroPositivo(lead?.faturamento);
+  const naoAproveitado = lead ? [
+    texto(lead.atividade) && !atividadeDoLead ? `atividade "${texto(lead.atividade)}"` : '',
+    texto(lead.regime) && !regimeDoLead ? `regime "${texto(lead.regime)}"` : '',
+  ].filter(Boolean) : [];
   const [entradas, setEntradas] = useState<Record<string, unknown>>({
     plano: 'Essencial',
-    atividade: texto(lead?.atividade) === 'Comércio' ? 'Comércio' : 'Serviços',
-    regime: 'Simples Nacional',
-    faturamento: 0,
+    atividade: atividadeDoLead ?? 'Serviços',
+    regime: regimeDoLead ?? 'Simples Nacional',
+    faturamento: faturamentoDoLead ?? 0,
   });
   const [extras, setExtras] = useState<PriceExtra[]>([]);
   const [observacoes, setObservacoes] = useState('');
@@ -105,6 +127,10 @@ export default function SimulationWizard({ lead, onClose, onSaved }: { lead?: En
           <label>Regime tributário<select value={String(entradas.regime)} onChange={event => definir('regime', event.target.value)}>{REGIMES.map(item => <option key={item}>{item}</option>)}</select></label>
           <label>Faturamento mensal (R$)<input type="number" min="0" step="0.01" value={String(entradas.faturamento ?? 0)} onChange={event => definir('faturamento', Number(event.target.value))}/></label>
           {lead ? <p className="sim-note">Lead: {texto(lead.empresa) || texto(lead.nome)}{texto(lead.cnpj) ? ` · CNPJ ${texto(lead.cnpj)}` : ''}{texto(lead.cidade) ? ` · ${texto(lead.cidade)}/${texto(lead.uf)}` : ''}</p> : null}
+          {naoAproveitado.length ? <p className="sim-note sim-note-aviso">
+            Não foi possível aproveitar {naoAproveitado.join(' e ')} do cadastro do lead. Confira os campos acima antes de calcular, porque a faixa aplicada depende deles.
+          </p> : null}
+          {lead && !faturamentoDoLead ? <p className="sim-note">O lead não tem faturamento cadastrado. Informe o valor para a faixa ser aplicada.</p> : null}
         </div> : null}
 
         {etapa === 1 ? <div className="sim-plans">{PLANOS.map(plano => {
