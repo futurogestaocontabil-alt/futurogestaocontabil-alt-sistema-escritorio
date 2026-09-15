@@ -102,6 +102,30 @@ describe.sequential('Servidor autenticado e persistência PostgreSQL',()=>{
   expect((await request('/api/whatsapp/send',{telefone:'5562999990000',text:'Sem sessão'},'')).response.status).toBe(401);
   expect((await request('/api/whatsapp/send',{telefone:'',text:''},adminCookie)).response.status).toBe(400);
  });
+ it('atribui o autor pelo fromMe, marca a origem e não duplica o que o sistema enviou',async()=>{
+  const conversa=async()=>{
+   const atual=await request('/api/state',undefined,adminCookie);
+   return (atual.json.state as AppState).conversas.find(item=>String(item.telefone)==='5562999990000')!;
+  };
+  const antes=await conversa();
+  const historicoAntes=(antes.mensagens as {texto:string}[]).length;
+  // A Evolution devolve pelo webhook a mensagem que a própria API enviou.
+  const enviadaPeloSistema=(antes.mensagens as {externoId:string|null}[]).at(-1)!.externoId;
+  expect(enviadaPeloSistema).toBe('mensagem-de-teste');
+  const eco=await request('/api/webhooks/evolution/messages-upsert',{event:'messages.upsert',data:{key:{remoteJid:'5562999990000@s.whatsapp.net',fromMe:true,id:'mensagem-de-teste'},message:{conversation:'Recebemos, vamos verificar.'}}},'');
+  expect(eco.response.status).toBe(202);
+  expect(((await conversa()).mensagens as unknown[]).length).toBe(historicoAntes);
+  // Mensagem que Gilmar mandou pelo celular entra como da equipe, não do cliente.
+  await request('/api/webhooks/evolution/messages-upsert',{event:'messages.upsert',data:{key:{remoteJid:'5562999990000@s.whatsapp.net',fromMe:true,id:'do-celular'},message:{conversation:'Respondi por aqui mesmo.'}}},'');
+  const comCelular=await conversa();
+  const ultima=(comCelular.mensagens as {texto:string;autor:string;origem:string}[]).at(-1)!;
+  expect(ultima).toMatchObject({texto:'Respondi por aqui mesmo.',autor:'equipe',origem:'Dispositivo externo'});
+  expect(comCelular.ultimaMensagem).toBe('Respondi por aqui mesmo.');
+  // Mensagem de grupo não vira conversa de cliente.
+  await request('/api/webhooks/evolution/messages-upsert',{event:'messages.upsert',data:{key:{remoteJid:'120363000000000000@g.us',fromMe:false,id:'do-grupo'},message:{conversation:'Mensagem de grupo'}}},'');
+  const depois=await request('/api/state',undefined,adminCookie);
+  expect((depois.json.state as AppState).conversas.some(item=>String(item.telefone).startsWith('12036'))).toBe(false);
+ });
  it('armazena arquivos privados e impede metadados de upload forjados',async()=>{
   const upload=await request('/api/documents',{name:'verificacao.txt',mimeType:'text/plain',contentBase64:Buffer.from('Documento exclusivo do teste').toString('base64'),tipo:'Protocolo',departamento:'Fiscal'});
   expect(upload.response.status).toBe(201);state=upload.json.state as AppState;const doc=upload.json.document as {id:string};

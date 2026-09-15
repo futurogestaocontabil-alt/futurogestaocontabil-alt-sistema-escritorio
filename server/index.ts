@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { createInitialState, runCommand, filterStateForActor } from '../src/services/domain/index';
 import { mapOpenCnpj, normalizeCnpj, validCnpjFormat } from '../src/services/cnpj';
-import type { Actor, AppState, Command } from '../src/types/domain';
+import { COMMAND_TYPES, type Actor, type AppState, type Command, type JsonValue } from '../src/types/domain';
 import { ApiError, LOCAL_ORG_ID, openDatabase, readState, updateState } from './database';
 import { actorFromRow, clearSession, createSession, currentAccount, decryptSecret, encryptSecret, hashPassword, loadVaultKey, verifyPassword, type AccountRow } from './auth';
 
@@ -16,8 +16,7 @@ const NAME = z.string().trim().min(2).max(200);
 const authSchema = z.object({ email: EMAIL, password: z.string().min(1).max(256) });
 const setupSchema = z.object({ nome: NAME, email: EMAIL, password: PASSWORD });
 const userSchema = setupSchema.extend({ papel: z.enum(['socio','operacao','administrativo','leitura']), departamentos: z.array(z.string().max(80)).max(10).default([]), memberId: z.string().max(100).optional() });
-const TYPES = ['save','delete','advanceProcess','toggleStep','completeTask','generateRecurring','convertLead','messageToTask','generateInvoices'] as const;
-const commandSchema = z.object({ type: z.enum(TYPES), collection: z.string().max(80).optional(), id: z.string().max(100).optional(), data: z.record(z.string(), z.json()).optional() }).strict();
+const commandSchema = z.object({ type: z.enum(COMMAND_TYPES), collection: z.string().max(80).optional(), id: z.string().max(100).optional(), data: z.record(z.string(), z.json()).optional() }).strict();
 const commandBodySchema = z.object({ command: commandSchema, expectedVersion: z.number().int().nonnegative().optional(), expectedRevision: z.number().int().nonnegative().optional() });
 const attachmentSchema = z.object({ name: z.string().min(1).max(250).optional(), nome: z.string().min(1).max(250).optional(), mimeType: z.string().max(150).default('application/octet-stream'), contentBase64: z.string().min(1).max(14_000_000), clientId: z.string().max(100).optional(), clienteId: z.string().max(100).optional(), tipo: z.string().min(1).max(80).default('Documento'), competencia: z.string().max(20).optional(), departamento: z.string().max(80).optional(), expectedVersion: z.number().int().nonnegative().optional() });
 const vaultSchema = z.object({ name: NAME.optional(), nome: NAME.optional(), login: z.string().max(254).default(''), secret: z.string().min(1).max(20_000), url: z.string().max(500).default(''), clientId: z.string().max(100).optional(), clienteId: z.string().max(100).optional(), department: z.string().max(80).optional(), departamento: z.string().max(80).optional() });
@@ -127,11 +126,19 @@ export async function createApp(options:ServerOptions={}) {
         const event=payload as Record<string,unknown>; const data=event.data as Record<string,unknown>|undefined; const key=data?.key as Record<string,unknown>|undefined;
         const message=data?.message as Record<string,unknown>|undefined; const conversation=typeof message?.conversation==='string'?message.conversation:typeof (message?.extendedTextMessage as Record<string,unknown>|undefined)?.text==='string'?String((message?.extendedTextMessage as Record<string,unknown>).text):'';
         const remoteJid=typeof key?.remoteJid==='string'?key.remoteJid:''; const telefone=normalizePhone(remoteJid);
-        if(telefone&&conversation&&(!key?.fromMe || event.event==='messages.upsert' || requestPath.endsWith('/messages-upsert'))){
-          const current=await readState(db,LOCAL_ORG_ID); const existing=current.conversas.find(item=>normalizePhone(item.telefone)===telefone); const mensagem={id:randomUUID(),texto:conversation,autor:'cliente',criadoEm:new Date().toISOString()};
-          const actor:Actor={id:'evolution-webhook',memberId:'evolution-webhook',nome:'Evolution API',email:'evolution@local',papel:'socio',departamentos:['Atendimento']};
-          const mensagensAnteriores=Array.isArray(existing?.mensagens)?existing.mensagens:[];
-          await updateState(db,LOCAL_ORG_ID,current.meta.revision,state=>runCommand(state,{type:'save',collection:'conversas',id:existing?.id??`whatsapp-${telefone}`,data:{telefone,status:'Não iniciado',origem:'WhatsApp',mensagens:[...mensagensAnteriores,mensagem]}},actor));
+        const daEquipe=key?.fromMe===true; const externoId=typeof key?.id==='string'?key.id:'';
+        const grupo=/@g\.us$/i.test(remoteJid);
+        if(telefone&&conversation&&!grupo){
+          const current=await readState(db,LOCAL_ORG_ID); const existing=current.conversas.find(item=>normalizePhone(item.telefone)===telefone);
+          const mensagensAnteriores=Array.isArray(existing?.mensagens)?existing.mensagens as Record<string,JsonValue>[]:[];
+          // A Evolution devolve pelo webhook o que o próprio sistema enviou.
+          // Sem esta checagem, toda mensagem enviada apareceria duas vezes.
+          const jaRegistrada=externoId&&mensagensAnteriores.some(item=>item.externoId===externoId);
+          if(!jaRegistrada){
+            const mensagem={id:randomUUID(),texto:conversation,autor:daEquipe?'equipe':'cliente',criadoEm:new Date().toISOString(),origem:daEquipe?'Dispositivo externo':'Recebida',externoId:externoId||null};
+            const actor:Actor={id:'evolution-webhook',memberId:'evolution-webhook',nome:'Evolution API',email:'evolution@local',papel:'socio',departamentos:['Atendimento']};
+            await updateState(db,LOCAL_ORG_ID,current.meta.revision,state=>runCommand(state,{type:'save',collection:'conversas',id:existing?.id??`whatsapp-${telefone}`,data:{telefone,status:existing?.status??'Não iniciado',origem:'WhatsApp',canal:'WhatsApp',vinculo:existing?.vinculo??'Não identificado',ultimaMensagem:conversation,ultimaInteracaoEm:new Date().toISOString(),mensagens:[...mensagensAnteriores,mensagem]}},actor));
+          }
         }
         send(res,202,{received:true}); return;
       }
@@ -185,9 +192,10 @@ export async function createApp(options:ServerOptions={}) {
         const telefone=normalizePhone(body.telefone); const message=String(body.text??'').trim();
         if(!telefone||!message) throw new ApiError(400,'Informe o telefone e a mensagem.');
         const credentials=await whatsappCredentials(orgId);if(!credentials)throw new ApiError(400,'Cadastre primeiro a Evolution API.');
-        await evolution(credentials,`/message/sendText/${encodeURIComponent(credentials.instanceName)}`,'POST',{number:telefone,text:message});
+        const envio=await evolution(credentials,`/message/sendText/${encodeURIComponent(credentials.instanceName)}`,'POST',{number:telefone,text:message});
+        const chaveEnvio=envio.key as Record<string,unknown>|undefined; const externoId=typeof chaveEnvio?.id==='string'?chaveEnvio.id:'';
         const current=await readState(db,orgId);const existing=current.conversas.find(item=>normalizePhone(item.telefone)===telefone);const mensagens=Array.isArray(existing?.mensagens)?existing.mensagens:[];
-        await updateState(db,orgId,current.meta.revision,state=>runCommand(state,{type:'save',collection:'conversas',id:existing?.id??`whatsapp-${telefone}`,data:{telefone,status:'Em atendimento',origem:'WhatsApp',mensagens:[...mensagens,{id:randomUUID(),texto:message,autor:'equipe',criadoEm:new Date().toISOString()}]}},actor));
+        await updateState(db,orgId,current.meta.revision,state=>runCommand(state,{type:'save',collection:'conversas',id:existing?.id??`whatsapp-${telefone}`,data:{telefone,status:'Em atendimento',origem:'WhatsApp',canal:'WhatsApp',vinculo:existing?.vinculo??'Não identificado',ultimaMensagem:message,ultimaInteracaoEm:new Date().toISOString(),mensagens:[...mensagens,{id:randomUUID(),texto:message,autor:'equipe',criadoEm:new Date().toISOString(),origem:'Enviada pelo sistema',externoId:externoId||null}]}},actor));
         await audit(actor,'whatsapp_message_sent',telefone);send(res,200,{sent:true});return;
       }
       const cnpjMatch=requestPath.match(/^\/api\/cnpj\/([0-9A-Za-z.\/-]+)$/);
@@ -205,7 +213,25 @@ export async function createApp(options:ServerOptions={}) {
       }
       if(requestPath==='/api/state'&&req.method==='GET') {
         const current=await readState(db,orgId); const webhookPath=path.join(directory,'evolution-webhooks.jsonl');
-        try { const lines=(await readFile(webhookPath,'utf8')).split(/\r?\n/).filter(Boolean).slice(-200); for(const line of lines){ const event=JSON.parse(line).payload as Record<string,unknown>; const data=event.data as Record<string,unknown>|undefined; const key=data?.key as Record<string,unknown>|undefined; const message=data?.message as Record<string,unknown>|undefined; const textValue=typeof message?.conversation==='string'?message.conversation:''; const phone=normalizePhone(key?.remoteJid); if(phone&&textValue&&!current.conversas.some(item=>normalizePhone(item.telefone)===phone)){ current.conversas.push({id:`whatsapp-${phone}`,telefone:phone,origem:'WhatsApp',status:'Não iniciado',mensagens:[{id:randomUUID(),autor:'cliente',texto:textValue,criadoEm:new Date().toISOString()}],createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); } } } catch { /* arquivo de eventos pode ainda não existir */ }
+        // Rede de segurança: se a gravação do webhook falhou por conflito de
+        // revisão, a conversa ainda aparece a partir do arquivo de eventos.
+        // As regras de autor, grupo e origem são as mesmas do webhook.
+        try {
+          const lines=(await readFile(webhookPath,'utf8')).split(/\r?\n/).filter(Boolean).slice(-200);
+          for(const line of lines){
+            const event=JSON.parse(line).payload as Record<string,unknown>;
+            const data=event.data as Record<string,unknown>|undefined; const key=data?.key as Record<string,unknown>|undefined;
+            const message=data?.message as Record<string,unknown>|undefined;
+            const textValue=typeof message?.conversation==='string'?message.conversation:typeof (message?.extendedTextMessage as Record<string,unknown>|undefined)?.text==='string'?String((message?.extendedTextMessage as Record<string,unknown>).text):'';
+            const remoteJid=typeof key?.remoteJid==='string'?key.remoteJid:'';
+            if(/@g\.us$/i.test(remoteJid)) continue;
+            const phone=normalizePhone(remoteJid);
+            if(!phone||!textValue||current.conversas.some(item=>normalizePhone(item.telefone)===phone)) continue;
+            const daEquipe=key?.fromMe===true; const externoId=typeof key?.id==='string'?key.id:null;
+            const agora=new Date().toISOString();
+            current.conversas.push({id:`whatsapp-${phone}`,telefone:phone,origem:'WhatsApp',canal:'WhatsApp',vinculo:'Não identificado',status:'Não iniciado',ultimaMensagem:textValue,ultimaInteracaoEm:agora,mensagens:[{id:randomUUID(),autor:daEquipe?'equipe':'cliente',texto:textValue,criadoEm:agora,origem:daEquipe?'Dispositivo externo':'Recebida',externoId}],createdAt:agora,updatedAt:agora});
+          }
+        } catch { /* arquivo de eventos pode ainda não existir */ }
         const visible=filterStateForActor(current,actor); send(res,200,{actor,state:visible});return;
       }
       if(requestPath==='/api/command'&&req.method==='POST') {

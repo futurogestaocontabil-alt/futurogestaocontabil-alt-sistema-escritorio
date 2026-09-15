@@ -21,6 +21,15 @@ export const TASK_MODELS: TaskModel[] = [
  model('gerencial','Relatório gerencial','Contábil','mensal',false,['Conferir base financeira','Preparar relatório gerencial','Analisar e registrar recomendações','Registrar entrega ao cliente']),model('fator-r','Análise de Fator R','Fiscal','mensal',false,['Confirmar dados e período de cálculo','Calcular e revisar o Fator R','Registrar diagnóstico e ação proposta']),model('cnds','Monitoramento de CNDs','Fiscal','mensal',false,['Consultar certidões nas fontes oficiais','Registrar validade e pendências','Comunicar ações necessárias']),
  model('planejamento','Planejamento tributário','Fiscal','anual',false,['Consolidar dados fiscais','Comparar cenários com normas vigentes','Revisar premissas','Apresentar e registrar diagnóstico']),model('resultados','Reunião de resultados','Contábil','mensal',false,['Agendar reunião de resultados','Apresentar análise','Registrar ata e encaminhamentos']),model('precificacao','Análise de precificação','Financeiro','trimestral',false,['Conferir custos e volume','Analisar margem por produto','Preparar proposta de preços','Registrar apresentação']),model('balanco','Balanço patrimonial e demonstrações','Contábil','anual',false,['Concluir conferências anuais','Gerar balanço e DRE do exercício','Gerar mutações do patrimônio líquido quando aplicável','Revisar e entregar demonstrações']),
 ];
+/**
+ * Modelos cuja entrega passa por aprovação do sócio antes de ir ao cliente,
+ * conforme a decisão 1.B: entregas contábeis relevantes e diagnósticos
+ * tributários. Risco fiscal ou jurídico é marcado caso a caso na própria
+ * tarefa, pelo campo exigeAprovacao.
+ */
+export const MODELOS_COM_APROVACAO = ['contabil','balanco','ecf','ecd','gerencial','resultados','planejamento','fator-r'] as const;
+export const requiresApproval = (modelId: string): boolean => (MODELOS_COM_APROVACAO as readonly string[]).includes(modelId);
+
 export function taskSteps(modelId: string, cliente: Pick<Entity,string> = {} as Entity): Step[] {
  const template=TASK_MODELS.find(item=>item.id===modelId); if(!template) throw new Error('Modelo de tarefa não encontrado.');
  const descriptions=[...template.passos];

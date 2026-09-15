@@ -86,7 +86,7 @@ describe('Gates operacionais e integridade do domínio',()=>{
   expect(()=>operation(state,{type:'save',collection:'atividades',data:{nome:'Log adulterado'}})).toThrow('imutável');
  });
  it('mantém propostas e integrações sem confirmação externa em estado de preparação',()=>{
-  let state=operation(createInitialState(),{type:'save',collection:'leads',id:'lead-a',data:{nome:'Lead isolado',origem:'Teste',responsavelId:'gilmar'}});
+  let state=operation(createInitialState(),{type:'save',collection:'leads',id:'lead-a',data:{nome:'Lead isolado',origem:'Indicação',responsavelId:'gilmar'}});
   state=operation(state,{type:'save',collection:'propostas',id:'proposal-a',data:{nome:'Proposta',leadId:'lead-a',plano:'Essencial',validade:'2026-09-30',condicaoPagamento:'Mensal',responsavelId:'gilmar',valor:500,status:'Rascunho'}});
   expect(()=>operation(state,{type:'save',collection:'propostas',id:'proposal-a',data:{status:'Enviada'}})).toThrow('comprovante de envio');
   expect(()=>operation(state,{type:'save',collection:'integracoes',id:'integracao-0',data:{status:'Ativa'}})).toThrow('teste de conexão');
