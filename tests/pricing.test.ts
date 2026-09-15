@@ -194,3 +194,18 @@ describe('Simulação de honorários, resultado', () => {
   expect(JSON.stringify(result)).not.toMatch(/economia/i);
  });
 });
+
+describe('Simulação de honorários, categorias do detalhamento', () => {
+ it('classifica cada linha para a tela agrupar sem adivinhar pelo nome', () => {
+  const result = calculatePrice({
+   plano: 'Mentor', atividade: 'Serviços', regime: 'Simples Nacional', faturamento: 50000,
+   colaboradores: 4, integracaoContabil: 'medio',
+  });
+  const porCategoria = (categoria: string) => result.itens.filter(line => line.categoria === categoria).map(line => line.nome);
+  expect(porCategoria('base')).toEqual(['Faixa até R$ 50.000']);
+  expect(porCategoria('plano')).toEqual(['Base Mentor']);
+  expect(porCategoria('criterio')).toEqual(['Colaboradores']);
+  expect(porCategoria('integracao')).toEqual(['Integração contábil']);
+  expect(result.itens.every(line => ['base','plano','criterio','integracao','extra'].includes(line.categoria))).toBe(true);
+ });
+});

@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, writeFile, unlink, stat, appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +20,11 @@ const commandSchema = z.object({ type: z.enum(COMMAND_TYPES), collection: z.stri
 const commandBodySchema = z.object({ command: commandSchema, expectedVersion: z.number().int().nonnegative().optional(), expectedRevision: z.number().int().nonnegative().optional() });
 const attachmentSchema = z.object({ name: z.string().min(1).max(250).optional(), nome: z.string().min(1).max(250).optional(), mimeType: z.string().max(150).default('application/octet-stream'), contentBase64: z.string().min(1).max(14_000_000), clientId: z.string().max(100).optional(), clienteId: z.string().max(100).optional(), tipo: z.string().min(1).max(80).default('Documento'), competencia: z.string().max(20).optional(), departamento: z.string().max(80).optional(), expectedVersion: z.number().int().nonnegative().optional() });
 const vaultSchema = z.object({ name: NAME.optional(), nome: NAME.optional(), login: z.string().max(254).default(''), secret: z.string().min(1).max(20_000), url: z.string().max(500).default(''), clientId: z.string().max(100).optional(), clienteId: z.string().max(100).optional(), department: z.string().max(80).optional(), departamento: z.string().max(80).optional() });
-const whatsappConfigSchema = z.object({ provider: z.literal('evolution'), baseUrl: z.string().url(), instanceName: z.string().trim().min(2).max(200).regex(/^[A-Za-z0-9_-]+$/), apiKey: z.string().trim().min(16).max(500) }).strict();
+const whatsappConfigSchema = z.object({ provider: z.literal('evolution'), baseUrl: z.string().url(), instanceName: z.string().trim().min(2).max(200).regex(/^[A-Za-z0-9_-]+$/), apiKey: z.string().trim().min(16).max(500), webhookToken: z.string().trim().min(16).max(200).optional() }).strict();
+const autentiqueConfigSchema = z.object({ token: z.string().trim().min(20).max(500), webhookToken: z.string().trim().min(16).max(200).optional(), sandbox: z.boolean().default(false) }).strict();
+const AUTENTIQUE_API = 'https://api.autentique.com.br/v2/graphql';
+/** Situações da Autentique mapeadas para as situações do contrato no sistema. */
+const AUTENTIQUE_EVENTOS: Record<string,'Assinado'|'Recusado'|'Aguardando assinatura'> = { 'signed':'Assinado', 'document.signed':'Assinado', 'finished':'Assinado', 'rejected':'Recusado', 'document.rejected':'Recusado', 'refused':'Recusado', 'viewed':'Aguardando assinatura', 'document.viewed':'Aguardando assinatura' };
 interface VaultMeta { id:string; nome:string; login:string; url:string; clienteId?:string; departamento:string; createdAt:string }
 interface VaultRow { id:string; ciphertext:string; metadata:VaultMeta }
 interface WhatsAppCredentials { provider:'evolution'; baseUrl:string; instanceName:string; apiKey:string }
@@ -95,6 +99,60 @@ export async function createApp(options:ServerOptions={}) {
     if(!response.ok)throw new ApiError(503,typeof payload?.message==='string'?payload.message:'Não foi possível consultar a Evolution API.');
     return payload??{};
   };
+  // Um segredo por integração, guardado no cofre cifrado com o mesmo mecanismo
+  // das credenciais do WhatsApp.
+  const segredoDe=async(orgId:string,nome:string)=> (await db.query<VaultRow>("SELECT id,ciphertext,metadata FROM app_private.vault_secrets WHERE org_id=$1 AND metadata->>'nome'=$2 ORDER BY created_at DESC LIMIT 1",[orgId,nome])).rows[0];
+  const gravarSegredo=async(orgId:string,nome:string,departamento:string,conteudo:unknown,actor:Actor)=> {
+    const previous=await segredoDe(orgId,nome); const id=previous?.id??randomUUID();
+    const meta:VaultMeta={id,nome,login:'',url:'',departamento,createdAt:previous?.metadata.createdAt??new Date().toISOString()};
+    const ciphertext=encryptSecret(JSON.stringify(conteudo),vaultKey,id);
+    if(previous)await db.query('UPDATE app_private.vault_secrets SET ciphertext=$1,metadata=$2::jsonb WHERE id=$3 AND org_id=$4',[ciphertext,JSON.stringify(meta),id,orgId]);
+    else await db.query('INSERT INTO app_private.vault_secrets(id,org_id,ciphertext,metadata) VALUES($1,$2,$3,$4::jsonb)',[id,orgId,ciphertext,JSON.stringify(meta)]);
+    await audit(actor,'integration_secret_saved',id); return id;
+  };
+  const lerSegredo=async<T>(orgId:string,nome:string):Promise<T|null>=> {
+    const row=await segredoDe(orgId,nome); if(!row)return null;
+    try{return JSON.parse(decryptSecret(row.ciphertext,vaultKey,row.id)) as T;}catch{throw new ApiError(500,`O segredo de ${nome} no cofre está inválido. Salve a configuração novamente.`);}
+  };
+  /**
+   * Comparação em tempo constante. Comparar com === vaza o tamanho do prefixo
+   * correto pelo tempo de resposta.
+   */
+  const tokenConfere=(esperado:string,recebido:string)=> {
+    const a=Buffer.from(esperado,'utf8'); const b=Buffer.from(recebido,'utf8');
+    if(a.length!==b.length)return false;
+    return timingSafeEqual(a,b);
+  };
+  /**
+   * Enquanto não houver token configurado, o webhook segue aberto, porque o
+   * servidor só escuta em 127.0.0.1. Assim que existir endereço público, basta
+   * cadastrar o token dos dois lados para fechar a rota.
+   */
+  const conferirTokenWebhook=async(req:IncomingMessage,integracao:string)=> {
+    const configurado=await lerSegredo<{webhookToken?:string}>(LOCAL_ORG_ID,integracao);
+    const esperado=String(configurado?.webhookToken??'');
+    if(!esperado)return;
+    const recebido=String(req.headers['x-webhook-token']??req.headers['x-hub-signature']??'');
+    if(!recebido||!tokenConfere(esperado,recebido))throw new ApiError(401,'Webhook sem token válido.');
+  };
+  /**
+   * Chamada à API da Autentique. O token nunca sai do servidor.
+   *
+   * ATENÇÃO: o formato exato das respostas da Autentique ainda não foi
+   * conferido com credenciais reais. Esta função devolve ok/detalhe em vez de
+   * afirmar sucesso, justamente para não registrar um resultado de integração
+   * que não foi observado. Validar antes de usar em produção.
+   */
+  const autentique=async(token:string,query:string,variables?:Record<string,unknown>):Promise<{ok:boolean;detalhe:string;dados:Record<string,unknown>|null}>=> {
+    let response:Response;
+    try{response=await providerFetch(AUTENTIQUE_API,{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json',Authorization:`Bearer ${token}`},body:JSON.stringify({query,variables:variables??{}}),signal:AbortSignal.timeout(15_000)});}
+    catch{return {ok:false,detalhe:'A Autentique não respondeu. Confira a conexão e tente novamente.',dados:null};}
+    const payload=await response.json().catch(()=>null) as Record<string,unknown>|null;
+    if(response.status===401||response.status===403)return {ok:false,detalhe:'A Autentique recusou o token informado.',dados:null};
+    if(!response.ok)return {ok:false,detalhe:`A Autentique respondeu com erro ${response.status}.`,dados:null};
+    if(Array.isArray(payload?.errors)&&payload.errors.length)return {ok:false,detalhe:'A Autentique recusou a solicitação. Confira o token e o formato esperado pela API.',dados:null};
+    return {ok:true,detalhe:'Conexão confirmada.',dados:(payload?.data as Record<string,unknown>)??null};
+  };
   const server=createServer(async(req,res)=> {
     res.setHeader('X-Content-Type-Options','nosniff'); res.setHeader('X-Frame-Options','DENY'); res.setHeader('Referrer-Policy','no-referrer');
     res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
@@ -105,7 +163,9 @@ export async function createApp(options:ServerOptions={}) {
       const isApi=requestPath.startsWith('/api/');
       const origin=req.headers.origin;
       if(origin&&!allowedOrigins.has(origin)) throw new ApiError(403,'Origem não autorizada.');
-      if(isApi&&!requestPath.startsWith('/api/webhooks/evolution')&&req.method!=='GET'&&req.method!=='HEAD'&&!origin) throw new ApiError(403,'A origem da solicitação é obrigatória.');
+      // Serviço externo não envia Origin. Todo webhook é isento desta exigência
+      // e se protege pelo token compartilhado, conferido em cada rota.
+      if(isApi&&!requestPath.startsWith('/api/webhooks/')&&req.method!=='GET'&&req.method!=='HEAD'&&!origin) throw new ApiError(403,'A origem da solicitação é obrigatória.');
       if(req.method==='OPTIONS') { if(origin) res.setHeader('Access-Control-Allow-Origin',origin); res.setHeader('Access-Control-Allow-Credentials','true'); res.setHeader('Access-Control-Allow-Headers','Content-Type'); res.setHeader('Access-Control-Allow-Methods','GET,POST,PATCH'); res.writeHead(204);res.end();return; }
       if(origin) {res.setHeader('Access-Control-Allow-Origin',origin);res.setHeader('Access-Control-Allow-Credentials','true');res.setHeader('Vary','Origin');}
       if(!isApi) {
@@ -122,6 +182,7 @@ export async function createApp(options:ServerOptions={}) {
         const account=await currentAccount(db,req);send(res,200,{configured,actor:account?actorFromRow(account):null,mode:'local'});return;
       }
       if((requestPath==='/api/webhooks/evolution'||requestPath.startsWith('/api/webhooks/evolution/'))&&req.method==='POST') {
+        await conferirTokenWebhook(req,'Evolution WhatsApp');
         const payload=await readJson(req,5_000_000); await appendFile(path.join(directory,'evolution-webhooks.jsonl'),JSON.stringify({receivedAt:new Date().toISOString(),payload})+'\n',{mode:0o600});
         const event=payload as Record<string,unknown>; const data=event.data as Record<string,unknown>|undefined; const key=data?.key as Record<string,unknown>|undefined;
         const message=data?.message as Record<string,unknown>|undefined; const conversation=typeof message?.conversation==='string'?message.conversation:typeof (message?.extendedTextMessage as Record<string,unknown>|undefined)?.text==='string'?String((message?.extendedTextMessage as Record<string,unknown>).text):'';
@@ -141,6 +202,25 @@ export async function createApp(options:ServerOptions={}) {
           }
         }
         send(res,202,{received:true}); return;
+      }
+      if(requestPath==='/api/webhooks/autentique'&&req.method==='POST') {
+        await conferirTokenWebhook(req,'Autentique');
+        const payload=await readJson(req,5_000_000) as Record<string,unknown>;
+        await appendFile(path.join(directory,'autentique-webhooks.jsonl'),JSON.stringify({receivedAt:new Date().toISOString(),payload})+'\n',{mode:0o600});
+        const evento=String(payload.event??payload.type??'').toLowerCase();
+        const documento=payload.document as Record<string,unknown>|undefined;
+        const externoId=String(documento?.id??payload.document_id??payload.id??'');
+        const situacao=AUTENTIQUE_EVENTOS[evento];
+        if(externoId&&situacao){
+          const current=await readState(db,LOCAL_ORG_ID);
+          const contrato=current.contratos.find(item=>String(item.autentiqueId??'')===externoId);
+          if(contrato&&contrato.status!=='Assinado'){
+            const webhookActor:Actor={id:'autentique-webhook',memberId:'autentique-webhook',nome:'Autentique',email:'autentique@local',papel:'socio',departamentos:['Comercial']};
+            if(situacao==='Assinado')await updateState(db,LOCAL_ORG_ID,current.meta.revision,state=>runCommand(state,{type:'registerSignature',id:contrato.id,data:{}},webhookActor));
+            else if(situacao==='Recusado')await updateState(db,LOCAL_ORG_ID,current.meta.revision,state=>runCommand(state,{type:'registerSignature',id:contrato.id,data:{recusado:true,motivo:'Assinatura recusada na Autentique'}},webhookActor));
+          }
+        }
+        send(res,202,{received:true});return;
       }
       if(requestPath==='/api/setup'&&req.method==='POST') {
         const key=`setup:${req.socket.remoteAddress}`;rateLimit(key);failure(key);
@@ -197,6 +277,21 @@ export async function createApp(options:ServerOptions={}) {
         const current=await readState(db,orgId);const existing=current.conversas.find(item=>normalizePhone(item.telefone)===telefone);const mensagens=Array.isArray(existing?.mensagens)?existing.mensagens:[];
         await updateState(db,orgId,current.meta.revision,state=>runCommand(state,{type:'save',collection:'conversas',id:existing?.id??`whatsapp-${telefone}`,data:{telefone,status:'Em atendimento',origem:'WhatsApp',canal:'WhatsApp',vinculo:existing?.vinculo??'Não identificado',ultimaMensagem:message,ultimaInteracaoEm:new Date().toISOString(),mensagens:[...mensagens,{id:randomUUID(),texto:message,autor:'equipe',criadoEm:new Date().toISOString(),origem:'Enviada pelo sistema',externoId:externoId||null}]}},actor));
         await audit(actor,'whatsapp_message_sent',telefone);send(res,200,{sent:true});return;
+      }
+      if(requestPath==='/api/autentique/config'&&req.method==='POST') {
+        assertAdmin(actor);
+        const credenciais=autentiqueConfigSchema.parse(await readJson(req));
+        await gravarSegredo(orgId,'Autentique','Comercial',credenciais,actor);
+        send(res,200,{configured:true});return;
+      }
+      if(requestPath==='/api/autentique/status'&&req.method==='GET') {
+        const credenciais=await lerSegredo<{token:string;webhookToken?:string}>(orgId,'Autentique');
+        if(!credenciais){send(res,200,{configured:false,webhookProtegido:false,conectado:false,detalhe:'Cadastre o token da Autentique em Configurações.'});return;}
+        const conferir=new URL(req.url??'/','http://local').searchParams.get('testar')==='1';
+        if(!conferir){send(res,200,{configured:true,webhookProtegido:Boolean(credenciais.webhookToken),conectado:null,detalhe:'Use Testar conexão para conferir o token.'});return;}
+        const resultado=await autentique(credenciais.token,'query { me { id email } }');
+        await audit(actor,'autentique_connection_tested');
+        send(res,200,{configured:true,webhookProtegido:Boolean(credenciais.webhookToken),conectado:resultado.ok,detalhe:resultado.detalhe});return;
       }
       const cnpjMatch=requestPath.match(/^\/api\/cnpj\/([0-9A-Za-z.\/-]+)$/);
       if(cnpjMatch&&req.method==='GET') {

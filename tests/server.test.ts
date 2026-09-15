@@ -126,6 +126,39 @@ describe.sequential('Servidor autenticado e persistência PostgreSQL',()=>{
   const depois=await request('/api/state',undefined,adminCookie);
   expect((depois.json.state as AppState).conversas.some(item=>String(item.telefone).startsWith('12036'))).toBe(false);
  });
+ it('fecha o webhook da Evolution assim que existe token configurado',async()=>{
+  const comToken={...CREDENCIAIS_EVOLUTION,webhookToken:'token-de-webhook-para-teste'};
+  expect((await request('/api/whatsapp/config',comToken,adminCookie)).response.status).toBe(200);
+  const semToken=await fetch(`${base}/api/webhooks/evolution/messages-upsert`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'messages.upsert',data:{key:{remoteJid:'5562988880000@s.whatsapp.net',fromMe:false,id:'sem-token'},message:{conversation:'Mensagem sem token'}}})});
+  expect(semToken.status).toBe(401);
+  const tokenErrado=await fetch(`${base}/api/webhooks/evolution/messages-upsert`,{method:'POST',headers:{'Content-Type':'application/json','x-webhook-token':'token-errado-de-tamanho-x'},body:JSON.stringify({event:'messages.upsert',data:{key:{remoteJid:'5562988880000@s.whatsapp.net',fromMe:false,id:'token-errado'},message:{conversation:'Mensagem com token errado'}}})});
+  expect(tokenErrado.status).toBe(401);
+  const correto=await fetch(`${base}/api/webhooks/evolution/messages-upsert`,{method:'POST',headers:{'Content-Type':'application/json','x-webhook-token':'token-de-webhook-para-teste'},body:JSON.stringify({event:'messages.upsert',data:{key:{remoteJid:'5562988880000@s.whatsapp.net',fromMe:false,id:'com-token'},message:{conversation:'Mensagem autorizada'}}})});
+  expect(correto.status).toBe(202);
+  const atual=await request('/api/state',undefined,adminCookie);
+  const conversa=(atual.json.state as AppState).conversas.find(item=>String(item.telefone)==='5562988880000');
+  expect(conversa).toBeDefined();
+  expect((conversa!.mensagens as {texto:string}[]).map(item=>item.texto)).toEqual(['Mensagem autorizada']);
+  // Volta ao estado sem token para não afetar os testes seguintes.
+  expect((await request('/api/whatsapp/config',CREDENCIAIS_EVOLUTION,adminCookie)).response.status).toBe(200);
+ });
+ it('guarda o token da Autentique no cofre e protege o webhook de assinatura',async()=>{
+  expect((await request('/api/autentique/config',{token:'curto'},adminCookie)).response.status).toBe(400);
+  const salvo=await request('/api/autentique/config',{token:'token-da-autentique-apenas-para-teste',webhookToken:'webhook-autentique-teste'},adminCookie);
+  expect(salvo.response.status).toBe(200);
+  const rows=await app.db.query<{ciphertext:string;metadata:Record<string,unknown>}>("SELECT ciphertext,metadata FROM app_private.vault_secrets WHERE metadata->>'nome'='Autentique'");
+  expect(rows.rows).toHaveLength(1);
+  expect(rows.rows[0].ciphertext).not.toContain('token-da-autentique');
+  expect(JSON.stringify(rows.rows[0].metadata)).not.toContain('token-da-autentique');
+  const status=await request('/api/autentique/status',undefined,adminCookie);
+  expect(status.json).toMatchObject({configured:true,webhookProtegido:true});
+  expect(JSON.stringify(status.json)).not.toContain('token-da-autentique');
+  expect((await request('/api/autentique/status',undefined,'')).response.status).toBe(401);
+  const semToken=await fetch(`${base}/api/webhooks/autentique`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'document.signed',document:{id:'doc-1'}})});
+  expect(semToken.status).toBe(401);
+  const comToken=await fetch(`${base}/api/webhooks/autentique`,{method:'POST',headers:{'Content-Type':'application/json','x-webhook-token':'webhook-autentique-teste'},body:JSON.stringify({event:'document.signed',document:{id:'doc-inexistente'}})});
+  expect(comToken.status).toBe(202);
+ });
  it('armazena arquivos privados e impede metadados de upload forjados',async()=>{
   const upload=await request('/api/documents',{name:'verificacao.txt',mimeType:'text/plain',contentBase64:Buffer.from('Documento exclusivo do teste').toString('base64'),tipo:'Protocolo',departamento:'Fiscal'});
   expect(upload.response.status).toBe(201);state=upload.json.state as AppState;const doc=upload.json.document as {id:string};

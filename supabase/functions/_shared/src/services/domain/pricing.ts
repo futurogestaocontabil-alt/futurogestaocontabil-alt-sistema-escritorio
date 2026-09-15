@@ -9,7 +9,8 @@ export interface PriceInput {
   icmsSt?: boolean; monofasico?: boolean; teraPontoIntegrado?: boolean;
   integracaoContabil?: 'alto'|'medio'|'baixo'; integracaoFiscal?: 'alto'|'medio'|'baixo'; extras?: PriceExtra[];
 }
-export interface PriceLine { nome: string; quantidade: number; valorUnitarioCentavos: number; totalCentavos: number }
+export type PriceCategory = 'base' | 'plano' | 'criterio' | 'integracao' | 'extra';
+export interface PriceLine { nome: string; quantidade: number; valorUnitarioCentavos: number; totalCentavos: number; categoria: PriceCategory }
 export interface PriceResult { valor: number; total: number; totalCentavos: number; baseCentavos: number; faixaCentavos: number; criteriosCentavos: number; extrasCentavos: number; limiteFaturamento: number; versao: string; itens: PriceLine[]; alertas: string[] }
 export const PRICE_VERSION = 'escopo-4.4-v1';
 type Band = readonly [limite: number, valor: number];
@@ -44,9 +45,9 @@ export function calculatePrice(input: PriceInput): PriceResult {
  const bases: Record<Plan,number> = {Essencial:0,Mentor:100,'Estratégico':560};
  if (!(input.plano in bases)) throw new Error('Plano inválido.');
  const itens: PriceLine[] = [];
- function add(nome: string, quantidade: number, value: number) { const cents=toCents(value); const total=quantidade*cents; if(!Number.isSafeInteger(total)) throw new Error('Valor calculado fora do limite.'); itens.push({nome,quantidade,valorUnitarioCentavos:cents,totalCentavos:total}); return total; }
- const baseCentavos=add(`Base ${input.plano}`,1,bases[input.plano]);
- const faixaCentavos=add(`Faixa até R$ ${band[0].toLocaleString('pt-BR')}`,1,band[1]);
+ function add(nome: string, quantidade: number, value: number, categoria: PriceCategory='criterio') { const cents=toCents(value); const total=quantidade*cents; if(!Number.isSafeInteger(total)) throw new Error('Valor calculado fora do limite.'); itens.push({nome,quantidade,valorUnitarioCentavos:cents,totalCentavos:total,categoria}); return total; }
+ const baseCentavos=add(`Base ${input.plano}`,1,bases[input.plano],'plano');
+ const faixaCentavos=add(`Faixa até R$ ${band[0].toLocaleString('pt-BR')}`,1,band[1],'base');
  let criteriosCentavos=0;
  const employees=count(input.colaboradores,'Colaboradores'); if(employees) criteriosCentavos+=add('Colaboradores',employees,employees<=3?50:employees<=6?40:employees<=15?35:employees<=30?32:30);
  const partners=count(input.proLabore,'Pró-labore'); if(partners>3) throw new Error('O escopo só fornece preço de pró-labore para até 3 pessoas.'); if(partners) criteriosCentavos+=add('Pró-labore',partners,30);
@@ -60,10 +61,10 @@ export function calculatePrice(input: PriceInput): PriceResult {
  if(input.monofasico===true) criteriosCentavos+=add('PIS/COFINS monofásico',1,100);
  if(input.teraPontoIntegrado===false) criteriosCentavos+=add('Sem ponto integrado',1,50);
  for(const [label,value] of [['Integração contábil',input.integracaoContabil],['Integração fiscal',input.integracaoFiscal]] as const) {
-  if(value!==undefined) { if(!['alto','medio','baixo'].includes(value)) throw new Error('Nível de integração inválido.'); criteriosCentavos+=add(label,1,value==='alto'?0:value==='medio'?90:150); }
+  if(value!==undefined) { if(!['alto','medio','baixo'].includes(value)) throw new Error('Nível de integração inválido.'); criteriosCentavos+=add(label,1,value==='alto'?0:value==='medio'?90:150,'integracao'); }
  }
  let extrasCentavos=0;
- for(const extra of input.extras??[]) { const qty=count(extra.quantidade,'Quantidade do extra'); if(!qty||!extra.servicoId||!extra.nome) throw new Error('Extra exige serviço do catálogo e quantidade maior que zero.'); if(toCents(extra.valor)===0&&!extra.aprovacaoSocio) throw new Error('Serviço sem preço exige aprovação explícita do sócio.'); extrasCentavos+=add(extra.nome,qty,extra.valor); }
+ for(const extra of input.extras??[]) { const qty=count(extra.quantidade,'Quantidade do extra'); if(!qty||!extra.servicoId||!extra.nome) throw new Error('Extra exige serviço do catálogo e quantidade maior que zero.'); if(toCents(extra.valor)===0&&!extra.aprovacaoSocio) throw new Error('Serviço sem preço exige aprovação explícita do sócio.'); extrasCentavos+=add(extra.nome,qty,extra.valor,'extra'); }
  const totalCentavos=baseCentavos+faixaCentavos+criteriosCentavos+extrasCentavos;
  if(!Number.isSafeInteger(totalCentavos)) throw new Error('Valor calculado fora do limite.');
  return {valor:totalCentavos/100,total:totalCentavos/100,totalCentavos,baseCentavos,faixaCentavos,criteriosCentavos,extrasCentavos,limiteFaturamento:band[0],versao:PRICE_VERSION,itens,alertas:['Simulação comercial com base na tabela fornecida. Não é cálculo de tributos.']};
