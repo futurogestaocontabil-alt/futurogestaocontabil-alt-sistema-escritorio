@@ -390,6 +390,11 @@ credenciais do usuário não devem ser solicitadas nem usadas por esta sessão.
 Enquanto a limitação existir, a referência do ChatSC vem de capturas de tela
 enviadas por Gilmar. Os demais blocos seguem sem bloqueio.
 
-Itens a observar quando houver captura: caixa de entrada, lista de conversas,
-conversa aberta, cabeçalho, painel do contato, transferência de atendimento,
-filtros, tags, status, histórico, criação de tarefa e organização por cliente.
+**Cinco capturas recebidas em 15/09/2026.** A análise está em
+`docs/referencia-chatsc.md` e cobre caixa de entrada, lista de conversas,
+conversa aberta, cabeçalho, painel do contato, menu de atendimento, menu de
+mensagem e configurações de atendimento.
+
+Não foram observadas por dentro as telas de Departamentos, Demandas, Tags,
+Jornadas, Tarefas e Ordens de Serviço. Se forem necessárias, pedir novas
+capturas no Bloco 9.
