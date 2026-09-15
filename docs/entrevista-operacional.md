@@ -6,8 +6,8 @@ Processo não confirmado fica marcado como **não definido** e não vira código
 | Bloco | Tema | Situação |
 |---|---|---|
 | 1 | Estrutura do escritório | Respondido em 15/09/2026 |
-| 2 | Entrada de leads | Respondido em 15/09/2026, com 3 pontos em aberto |
-| 3 | Reunião comercial | Aguardando |
+| 2 | Entrada de leads | Fechado em 15/09/2026 |
+| 3 | Reunião comercial | Respondido em 15/09/2026, 5 itens não definidos |
 | 4 | Conversão em cliente | Aguardando |
 | 5 | Cadastro do cliente | Aguardando |
 | 6 | Onboarding | Aguardando |
@@ -245,3 +245,151 @@ Dez perguntas obrigatórias antes de agendar é muito para uma SDR cuja meta
 única é o agendamento. Recomendação registrada: reduzir o mínimo ao que
 realmente decide se a reunião acontece e deixar o restante para o diagnóstico
 conduzido por Gilmar.
+
+### Bloco 2: decisões fechadas em 15/09/2026
+
+**2.A. Origens do lead.** Mantidas as onze opções já existentes no código:
+Indicação, Programa de Indicação, BNI, Networking, WhatsApp, Google Meu
+Negócio, Instagram, Site, Tráfego pago, Cliente antigo e Outro.
+
+**2.B. Canais de atendimento.** WhatsApp, Telefone, Instagram, E-mail, Site,
+Indicação e Atendimento manual registrado pela equipe. Somente o WhatsApp é
+canal integrado. Os demais são registrados manualmente, mas precisam aparecer
+como origem e como canal do lead.
+
+O lead passa a ter dois campos distintos: **origem**, que responde de onde a
+pessoa veio, e **canal**, que responde por onde ela falou. Hoje o código tem
+apenas origem.
+
+**2.C. Classificação do lead.** Manual, feita por Tamires, com os critérios
+exibidos na tela como lembrete. Sem pontuação automática. Valores:
+Qualificado, Em avaliação, Não qualificado e Perdido. O sistema mostra os
+critérios e nunca decide sozinho.
+
+**Perguntas mínimas antes da reunião, reduzidas de dez para seis:**
+
+1. Qual é a empresa e o CNPJ?
+2. Qual é a atividade principal?
+3. A empresa está ativa?
+4. Qual é o principal problema hoje?
+5. A pessoa participa da decisão ou consegue trazer o decisor?
+6. Existe urgência ou prazo para resolver?
+
+As demais informações são preenchidas depois pelo CNPJ, durante a reunião ou
+no diagnóstico.
+
+## Bloco 3: reunião comercial
+
+### Respondido
+
+- A reunião é conduzida por Gilmar.
+- Dados obrigatórios de registro: diagnóstico, dores, riscos, oportunidades,
+  regime, faturamento, atividade, situação atual, objeções, proposta, próximo
+  passo e follow-up.
+- Antes de falar de preço, identificar: principal dor, impacto financeiro ou
+  operacional, urgência, situação com o contador atual, risco de continuar como
+  está e objetivo do cliente.
+- A solução é apresentada pelos planos Essencial, Mentor e Estratégico,
+  conforme o perfil do cliente.
+- O honorário considera plano, complexidade, faturamento, funcionários,
+  pró-labore, quantidade de obrigações, serviços extras e nível de
+  acompanhamento.
+- A proposta pode ser enviada por PDF, WhatsApp ou e-mail.
+
+### Não definido
+
+| # | Item | Situação |
+|---|---|---|
+| 3.A | Participação de Daniel ou Tamires na reunião | Não definido |
+| 3.B | Quem aprova desconto e qual é o limite | Não definido. Por ora, considerar que Gilmar aprova |
+| 3.C | Formato principal de envio da proposta | Não definido. Hoje os três formatos são aceitos |
+| 3.D | Cadência de follow-up depois da reunião | Não definido |
+| 3.E | Ratificação do roteiro e das perguntas obrigatórias | Ver abaixo |
+
+Nada marcado como não definido pode virar regra no código.
+
+### Confronto com o que já existe no repositório
+
+Gilmar respondeu que o roteiro da reunião ainda precisa ser documentado e que
+as perguntas obrigatórias não estão formalizadas. **Existe material formalizado
+no repositório que ele aparentemente não considerou.**
+
+`docs/comercial/roteiro-reuniao-vendas-contabilidade.md` tem 377 linhas e
+contém:
+
+- Roteiro de reunião em sete etapas com tempo por etapa, somando 46 minutos:
+  quebra-gelo e contrato da conversa, situação atual, problema e impacto,
+  prioridade e decisão, resumo do diagnóstico, proposta e fechamento.
+- Perguntas obrigatórias por etapa, entre cinco e seis em cada uma.
+- Quebras para nove objeções, incluindo "está caro", "preciso pensar", "vou
+  falar com meu sócio" e "você garante economia tributária?".
+- Modelo de mensagem de follow-up.
+- Oito indicadores de qualidade da reunião.
+- Ficha rápida para o CRM com quatorze campos.
+
+**Limite desse documento, declarado nele mesmo:** foi construído a partir de uma
+análise resumida de uma reunião, não de gravação ou transcrição integral. Tom,
+sequência e fidelidade das frases não foram confirmados. Portanto é proposta,
+não processo confirmado. Por isso o item 3.E é ratificação, não redação.
+
+O motor de preços em `src/services/domain/pricing.ts` já implementa exatamente
+os fatores da resposta 7: plano como base, faixa por atividade e regime,
+colaboradores, pró-labore, contas financeiras, ponto por colaborador, guias
+DIFAL, emissão de notas, contas a pagar, ponto eletrônico, ICMS-ST, monofásico,
+nível de integração contábil e fiscal, e serviços extras.
+
+Duas travas já implementadas no motor de preços:
+
+1. Atividade Indústria não tem tabela e o cálculo é recusado. Consta como
+   pendência em `docs/pendencias.md`.
+2. Serviço extra sem preço exige aprovação explícita do sócio.
+
+**Não existe mecanismo de desconto no motor de preços.** Não há campo de
+desconto, percentual máximo nem aprovação de desconto. A única aprovação
+existente é para extra com valor zero. Enquanto 3.B estiver não definido, não
+há o que implementar.
+
+### Conflitos entre o Bloco 2, o Bloco 3 e o playbook
+
+| Conflito | Playbook diz | Decisão de Gilmar diz |
+|---|---|---|
+| Classificação do lead | Pontuação de 0 a 12 com faixas automáticas decidindo se marca reunião | Classificação manual por Tamires, sem pontuação automática (2.C) |
+| Situação do lead | Seis valores: qualificado, documentos pendentes, nutrição, proposta, ganho, perdido | Quatro valores: Qualificado, Em avaliação, Não qualificado, Perdido (2.C) |
+| Critério para marcar reunião | Exige capacidade de investir acima do preço de entrada e disposição de enviar documentos | Seis perguntas mínimas, sem faturamento mínimo definido (2.A a 2.C) |
+
+Prevalece a decisão de Gilmar. A tabela de pontuação do playbook pode virar
+lembrete na tela, nunca regra automática.
+
+## Publicação: decisão registrada em 15/09/2026
+
+A Vercel não executa o servidor Node atual com PGlite em disco local. O deploy
+existente não é considerado pronto e não deve ser tratado como publicação.
+
+Nos próximos 30 dias a prioridade é o funcionamento local completo de CRM,
+clientes, tarefas, financeiro e atendimento WhatsApp. Não publicar versão
+quebrada na Vercel.
+
+A decisão de publicação será avaliada depois, entre três caminhos:
+
+1. Supabase Edge Functions com banco Supabase.
+2. Servidor persistente no Oracle Cloud.
+3. Permanecer local durante o desenvolvimento.
+
+## Limitação de ambiente registrada: ChatSC
+
+O ChatSC deve ser usado como referência funcional do atendimento, sem cópia de
+código nem de identidade visual.
+
+**Esta sessão não consegue acessar o ChatSC.** Verificado, não presumido: o
+ambiente roda em container Linux com política de rede de lista restrita. Testes
+de saída retornaram bloqueio para `api.opencnpj.org` e `www.google.com`, com
+acesso liberado apenas ao GitHub. Existe Chromium instalado no container, mas
+ele não alcança destinos fora da lista. Além disso, o ChatSC exige login, e
+credenciais do usuário não devem ser solicitadas nem usadas por esta sessão.
+
+Enquanto a limitação existir, a referência do ChatSC vem de capturas de tela
+enviadas por Gilmar. Os demais blocos seguem sem bloqueio.
+
+Itens a observar quando houver captura: caixa de entrada, lista de conversas,
+conversa aberta, cabeçalho, painel do contato, transferência de atendimento,
+filtros, tags, status, histórico, criação de tarefa e organização por cliente.
