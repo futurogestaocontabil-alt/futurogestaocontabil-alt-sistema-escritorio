@@ -1,19 +1,23 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart3, BriefcaseBusiness, Building2, CalendarCheck2, ChevronRight, CircleDollarSign, ClipboardList, FileArchive, FileText, LayoutDashboard, LogOut, Menu, MessageCircle, Settings2, ShieldCheck, Users, X, Landmark } from 'lucide-react';
+import { BarChart3, FileSignature, Handshake, BriefcaseBusiness, Building2, CalendarCheck2, ChevronRight, CircleDollarSign, ClipboardList, FileArchive, FileText, LayoutDashboard, LogOut, Menu, MessageCircle, Settings2, ShieldCheck, Users, X, Landmark } from 'lucide-react';
 import AppProvider from './components/AppProvider';
 import { Card, EmptyState, PageHeader, Badge } from './components/ui';
 import ResourceTable from './components/ResourceTable';
 import ClientPortfolioBI from './components/ClientPortfolioBI';
 import FinanceDashboard from './components/FinanceDashboard';
 import WhatsAppConnection from './components/WhatsAppConnection';
+import AutentiqueConnection from './components/AutentiqueConnection';
+import EscritorioDocumentos from './components/EscritorioDocumentos';
 import ChatInbox from './components/ChatInbox';
 import AuthPage from './pages/AuthPage';
 import DashboardPage from './pages/DashboardPage';
 import TasksPage from './pages/TasksPage';
 import CrmPage from './pages/CrmPage';
 import ProcessesPage from './pages/ProcessesPage';
-import { api } from './services/api';
+import ContratosPage from './pages/ContratosPage';
+import OnboardingPage from './pages/OnboardingPage';
+import { api, MODO_DEMONSTRACAO } from './services/api';
 import { useApp } from './hooks/useApp';
 import { schemas } from './services/resourceSchema';
 import { entityName, text } from './utils/records';
@@ -40,6 +44,15 @@ function LoadingScreen() {
   return <div className="loading-screen"><img src="/brand/Logo.png" alt="Futuro Contabilidade Digital"/><span className="loading-mark"/><p>Preparando sua plataforma…</p></div>;
 }
 
+/** Aviso permanente para ninguém confundir a demonstração com o sistema real. */
+function FaixaDemonstracao() {
+  return <div className="faixa-demonstracao" role="status">
+    <strong>Ambiente de demonstração.</strong>
+    <span>Empresas, valores e conversas são fictícios. O que você alterar fica só no seu navegador e some ao fechar a aba. WhatsApp, Autentique e consulta de CNPJ estão desligados.</span>
+    <button type="button" onClick={() => { void (async () => { const { reiniciarDemonstracao } = await import('./services/demonstracao/servidor'); reiniciarDemonstracao(); window.location.reload(); })(); }}>Recomeçar do zero</button>
+  </div>;
+}
+
 function Shell({ children }: { children: ReactNode }) {
   const { actor, logout, state } = useApp();
   const [open, setOpen] = useState(false);
@@ -56,7 +69,7 @@ function Shell({ children }: { children: ReactNode }) {
       <nav className="main-nav" aria-label="Navegação principal">{navigation.map(item => { const Icon = item.icon; return <NavLink key={item.path} to={item.path} end={item.path === '/'} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}><Icon size={18}/><span>{item.label}</span>{item.path==='/tarefas'&&state.tarefas.filter(task=>!['Concluída','Concluído'].includes(text(task.status))).length>0?<em>{state.tarefas.filter(task=>!['Concluída','Concluído'].includes(text(task.status))).length}</em>:null}</NavLink>; })}</nav>
       <div className="sidebar-footer"><button className="profile-mini" onClick={() => navigate('/escritorio?aba=equipe')}><span className="avatar">{initials}</span><span><strong>{firstName}</strong><small>{text(actor.papel) || 'Acesso interno'}</small></span><ChevronRight size={15}/></button><button className="logout-link" onClick={() => void logout()}><LogOut size={16}/>Sair da plataforma</button></div>
     </aside>
-    <main className="main-area"><header className="topbar"><button className="mobile-menu" onClick={() => setOpen(true)} aria-label="Abrir menu"><Menu size={21}/></button><div className="breadcrumb"><span>Plataforma Futuro</span><ChevronRight size={14}/><strong>{navigation.find(item => item.path===location.pathname)?.label || 'Visão geral'}</strong></div><div className="topbar-actions"><span className="topbar-date"><CalendarCheck2 size={15}/> {new Intl.DateTimeFormat('pt-BR',{dateStyle:'medium'}).format(new Date())}</span><span className="topbar-avatar">{initials}</span></div></header><div className="page-content">{children}</div></main>
+    <main className="main-area">{MODO_DEMONSTRACAO ? <FaixaDemonstracao/> : null}<header className="topbar"><button className="mobile-menu" onClick={() => setOpen(true)} aria-label="Abrir menu"><Menu size={21}/></button><div className="breadcrumb"><span>Plataforma Futuro</span><ChevronRight size={14}/><strong>{navigation.find(item => item.path===location.pathname)?.label || 'Visão geral'}</strong></div><div className="topbar-actions"><span className="topbar-date"><CalendarCheck2 size={15}/> {new Intl.DateTimeFormat('pt-BR',{dateStyle:'medium'}).format(new Date())}</span><span className="topbar-avatar">{initials}</span></div></header><div className="page-content">{children}</div></main>
   </div>;
 }
 
@@ -89,12 +102,12 @@ function DocumentsPage() {
 }
 
 function OfficePage() {
-  return <><PageHeader eyebrow="ESCRITÓRIO" title="Estrutura do escritório" description="Equipe, sistemas, metas e desenvolvimento ficam organizados neste espaço."/><div className="quick-cards"><NavLink to="/escritorio/equipe"><Users size={21}/><strong>Equipe</strong><span>Responsabilidades e carga</span></NavLink><NavLink to="/escritorio/sistemas"><Settings2 size={21}/><strong>Sistemas</strong><span>Ferramentas e custos</span></NavLink><NavLink to="/escritorio/metas"><BarChart3 size={21}/><strong>Metas e OKRs</strong><span>Objetivos em acompanhamento</span></NavLink><NavLink to="/escritorio/cargos"><BriefcaseBusiness size={21}/><strong>Cargos e salários</strong><span>Critérios de crescimento</span></NavLink></div></>;
+  return <><PageHeader eyebrow="ESCRITÓRIO" title="Estrutura do escritório" description="Equipe, sistemas, metas e desenvolvimento ficam organizados neste espaço."/><div className="quick-cards"><NavLink to="/crm/contratos"><FileSignature size={21}/><strong>Contratos</strong><span>Assinatura e ativação</span></NavLink><NavLink to="/clientes/onboarding"><Handshake size={21}/><strong>Onboarding</strong><span>Implantação do cliente</span></NavLink><NavLink to="/escritorio/equipe"><Users size={21}/><strong>Equipe</strong><span>Responsabilidades e carga</span></NavLink><NavLink to="/escritorio/sistemas"><Settings2 size={21}/><strong>Sistemas</strong><span>Ferramentas e custos</span></NavLink><NavLink to="/escritorio/metas"><BarChart3 size={21}/><strong>Metas e OKRs</strong><span>Objetivos em acompanhamento</span></NavLink><NavLink to="/escritorio/cargos"><BriefcaseBusiness size={21}/><strong>Cargos e salários</strong><span>Critérios de crescimento</span></NavLink></div></>;
 }
 
 function ConfigPage() {
   const { actor } = useApp();
-  return <><PageHeader eyebrow="ADMINISTRAÇÃO" title="Configurações" description="Parâmetros, integrações, roteiros e acessos que orientam a operação."/><WhatsAppConnection/><div className="settings-grid"><NavLink to="/configuracoes/instrucoes"><FileText size={21}/><strong>Processos e instruções</strong><span>POP, scripts e modelos de mensagem</span></NavLink><NavLink to="/configuracoes/acessos"><ShieldCheck size={21}/><strong>Usuários e permissões</strong><span>Perfis, departamentos e acesso por função</span></NavLink><div className="settings-note"><Badge tone="success">Sessão protegida</Badge><h3>{actor.nome}</h3><p>O cofre cifra segredos localmente. A chave fica na pasta de dados privada e deve entrar no backup protegido.</p></div></div></>;
+  return <><PageHeader eyebrow="ADMINISTRAÇÃO" title="Configurações" description="Parâmetros, integrações, roteiros e acessos que orientam a operação."/><WhatsAppConnection/><AutentiqueConnection/><div className="settings-grid"><NavLink to="/configuracoes/documentos"><FileSignature size={21}/><strong>Proposta e contrato</strong><span>Dados do escritório e modelos</span></NavLink><NavLink to="/configuracoes/instrucoes"><FileText size={21}/><strong>Processos e instruções</strong><span>POP, scripts e modelos de mensagem</span></NavLink><NavLink to="/configuracoes/acessos"><ShieldCheck size={21}/><strong>Usuários e permissões</strong><span>Perfis, departamentos e acesso por função</span></NavLink><div className="settings-note"><Badge tone="success">Sessão protegida</Badge><h3>{actor.nome}</h3><p>O cofre cifra segredos localmente. A chave fica na pasta de dados privada e deve entrar no backup protegido.</p></div></div></>;
 }
 
 function GenericResource({ collection, title, description }: { collection: CollectionName; title?: string; description?: string }) {
@@ -104,7 +117,7 @@ function GenericResource({ collection, title, description }: { collection: Colle
 
 function AuthenticatedApp({ actor, state, onLogout }: { actor: Actor; state: AppState; onLogout: () => void }) {
   return <AppProvider actor={actor} initialState={state} onLogout={onLogout}><Shell><Routes>
-    <Route path="/" element={<DashboardPage/>}/><Route path="/crm" element={<CrmPage/>}/><Route path="/atendimento" element={<AtendimentoPage/>}/><Route path="/clientes" element={<ClientsPage/>}/><Route path="/legalizacao" element={<ProcessesPage/>}/><Route path="/tarefas" element={<TasksPage/>}/><Route path="/financeiro" element={<FinancePage/>}/><Route path="/contabil" element={<AccountingPage/>}/><Route path="/portfolio" element={<GenericResource collection="servicos"/>}/><Route path="/escritorio" element={<OfficePage/>}/><Route path="/escritorio/equipe" element={<GenericResource collection="equipe"/>}/><Route path="/escritorio/sistemas" element={<GenericResource collection="sistemas"/>}/><Route path="/escritorio/metas" element={<GenericResource collection="metas"/>}/><Route path="/escritorio/cargos" element={<GenericResource collection="cargos"/>}/><Route path="/documentos" element={<DocumentsPage/>}/><Route path="/configuracoes" element={<ConfigPage/>}/><Route path="/configuracoes/instrucoes" element={<GenericResource collection="configuracoes"/>}/><Route path="/configuracoes/acessos" element={<GenericResource collection="equipe" title="Usuários e permissões" description="A criação de contas e a alteração de permissões exigem acesso de sócio."/>}/><Route path="*" element={<Navigate to="/" replace/>}/>
+    <Route path="/" element={<DashboardPage/>}/><Route path="/crm" element={<CrmPage/>}/><Route path="/crm/contratos" element={<ContratosPage/>}/><Route path="/atendimento" element={<AtendimentoPage/>}/><Route path="/clientes" element={<ClientsPage/>}/><Route path="/clientes/onboarding" element={<OnboardingPage/>}/><Route path="/legalizacao" element={<ProcessesPage/>}/><Route path="/tarefas" element={<TasksPage/>}/><Route path="/financeiro" element={<FinancePage/>}/><Route path="/contabil" element={<AccountingPage/>}/><Route path="/portfolio" element={<GenericResource collection="servicos"/>}/><Route path="/escritorio" element={<OfficePage/>}/><Route path="/escritorio/equipe" element={<GenericResource collection="equipe"/>}/><Route path="/escritorio/sistemas" element={<GenericResource collection="sistemas"/>}/><Route path="/escritorio/metas" element={<GenericResource collection="metas"/>}/><Route path="/escritorio/cargos" element={<GenericResource collection="cargos"/>}/><Route path="/documentos" element={<DocumentsPage/>}/><Route path="/configuracoes" element={<ConfigPage/>}/><Route path="/configuracoes/documentos" element={<><PageHeader eyebrow="DOCUMENTOS" title="Modelos de proposta e contrato" description="Dados do escritório, modelos versionados e pré-visualização. Nada de dado pessoal fica no código."/><EscritorioDocumentos/></>}/><Route path="/configuracoes/instrucoes" element={<GenericResource collection="configuracoes"/>}/><Route path="/configuracoes/acessos" element={<GenericResource collection="equipe" title="Usuários e permissões" description="A criação de contas e a alteração de permissões exigem acesso de sócio."/>}/><Route path="*" element={<Navigate to="/" replace/>}/>
   </Routes></Shell></AppProvider>;
 }
 

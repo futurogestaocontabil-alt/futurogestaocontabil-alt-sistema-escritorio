@@ -1,6 +1,8 @@
 import { COLLECTIONS, type AppState, type Entity, type JsonValue } from '../../types/domain.ts';
 import { PRICE_TABLES, PRICE_VERSION } from './pricing.ts';
 import { PROCESS_TEMPLATES, TASK_MODELS } from './templates.ts';
+import { CATALOGO_SERVICOS } from './servicos.ts';
+import { MODELOS_DOCUMENTO } from './modelosDocumento.ts';
 export function makeEntity(data: Record<string,JsonValue>, id: string=crypto.randomUUID(), now=new Date().toISOString()): Entity { return {...data,id,createdAt:now,updatedAt:now}; }
 export function createInitialState(organizacaoId='futuro'): AppState {
  const state = Object.fromEntries(COLLECTIONS.map(key=>[key,[]])) as unknown as AppState;
@@ -9,7 +11,15 @@ export function createInitialState(organizacaoId='futuro'): AppState {
  const entity=(id:string,data:Record<string,JsonValue>)=>makeEntity(data,id,now);
  state.equipe=[entity('gilmar',{nome:'Gilmar Santos',cargo:'CEO / Sócio',papel:'socio',departamento:'Direção',departamentos:['Fiscal','Pessoal','Contábil','Paralegal e Legalização','Financeiro','Comercial','Administrativo'],crc:'GO-028974/O',status:'Ativo',gestorId:null}),entity('daniel',{nome:'Daniel Branquinho',cargo:'Operações',papel:'operacao',departamento:'Operações',departamentos:['Fiscal','Pessoal','Contábil','Paralegal e Legalização'],status:'Ativo',gestorId:'gilmar'}),entity('tamires',{nome:'Tamires',cargo:'SDR e administrativo',papel:'administrativo',departamento:'Administrativo',departamentos:['Administrativo','Comercial'],status:'Ativo',gestorId:'gilmar'})];
  const services: [string,string,number,string,string,boolean?][]=[['remissao-das','Remissão de guia DAS',5,'por evento','Fiscal'],['remissao-fgts','Remissão de guia FGTS e INSS',10,'por evento','Pessoal'],['nota-nfse','Emissão de NFS-e',10,'por nota','Fiscal'],['nota-nfe','Emissão de NF-e',20,'por nota','Fiscal'],['rescisao-sem-registro','Rescisão de funcionário sem registro',80,'por evento','Pessoal'],['pesquisa-ibge','Pesquisa do IBGE',197,'por evento','Fiscal'],['parcelamento','Parcelamento Simples Nacional, Receita e PGFN',250,'por evento','Fiscal'],['itr','Declaração de ITR',150,'por evento','Fiscal',true],['irpf-simplificada','Declaração de imposto de renda simplificada',150,'por evento','Fiscal'],['irpf-completa','Declaração de imposto de renda completa',200,'por evento','Fiscal',true],['treinamento-administrativo','Treinamento administrativo',180,'por evento','Administrativo'],['conciliacao-cartao','Conciliação de cartão de crédito',250,'por evento','Financeiro']];
- state.servicos=services.map(([id,nome,valor,unidade,departamento,aPartirDe])=>entity(id,{nome,valor,unidade,departamento,aPartirDe:!!aPartirDe,ativo:true,categoria:'Extras e retrabalhos',versao:1,origem:'Escopo fornecido, seção 10',incluidoPlanos:[],historicoPrecos:[{versao:1,valor,vigenteDesde:now}]}));
+ state.servicos=services.map(([id,nome,valor,unidade,departamento,aPartirDe])=>entity(id,{nome,valor,unidade,departamento,aPartirDe:!!aPartirDe,ativo:true,situacaoPreco:valor>0?'Preço aprovado':'Aguardando definição de preço',categoria:'Extras e retrabalhos',versao:1,origem:'Escopo fornecido, seção 10',incluidoPlanos:[],historicoPrecos:[{versao:1,valor,vigenteDesde:now}]}));
+ // Catálogo comercial parametrizado em 15/09/2026. Valores iniciais, não
+ // tabela oficial de mercado nem promessa de venda.
+ const slug=(nome:string)=>nome.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60);
+ for(const servico of CATALOGO_SERVICOS){
+  const id=`servico-${slug(servico.nome)}`;
+  if(state.servicos.some(item=>item.id===id)) continue;
+  state.servicos.push(entity(id,{nome:servico.nome,valor:servico.valor,unidade:'por serviço',departamento:servico.departamento,aPartirDe:false,ativo:servico.situacaoPreco!=='Desativado',situacaoPreco:servico.situacaoPreco,categoria:'Serviços adicionais',versao:1,origem:'Parametrização comercial de 15/09/2026',incluidoPlanos:[],historicoPrecos:[{versao:1,valor:servico.valor,vigenteDesde:now}]}));
+ }
  state.integracoes=['Z-API','Cora','Alterdata','eContador','NF Stock','Veri','Intermediador de NFS-e','Google Workspace','Assinatura digital'].map((nome,i)=>entity(`integracao-${i}`,{nome,status:'Não configurada',ambiente:'Homologação',observacoes:'Configurar credenciais no cofre e validar conexão antes de usar.'}));
  state.cargos=['Estagiário','Auxiliar','Assistente','Analista','CEO'].map((nome,i)=>entity(`cargo-${i}`,{nome,nivel:nome==='CEO'?'Sócio':nome,departamento:'A definir',salarioMinimo:null,salarioMaximo:null,criteriosPromocao:''}));
  state.metas=[entity('meta-clientes-2026',{nome:'Alcançar 100 clientes ativos',objetivo:'100 ou mais clientes ativos até 31/12/2026',valorMeta:100,indicador:'clientesAtivos',prazo:'2026-12-31',responsavelId:'gilmar',baseHistorica:50,dataBaseHistorica:'2026-09',observacoes:'A base histórica é referência do escopo. O progresso atual usa somente clientes cadastrados.'})];
@@ -17,7 +27,21 @@ export function createInitialState(organizacaoId='futuro'): AppState {
  const mentor=[...essential.filter(item=>!item.startsWith('Suporte por e-mail')),'Suporte tributário prioritário por WhatsApp','Relatórios gerenciais','Distribuição de lucro com compliance tributário','Programa de indicação','Análise tributária com Fator R','Monitoramento fiscal e CNDs na Veri','Planejamento tributário','Treinamento de gestão financeira','Sistema de gestão financeira','Grupo exclusivo no WhatsApp'];
  state.configuracoes=[
  entity('empresa',{tipo:'empresa',nome:'Futuro Contabilidade Digital',crc:'GO-028974/O',cidade:'Goiânia',uf:'GO'}),
- entity('tabela-precos',{tipo:'precos',nome:'Tabela comercial',versao:PRICE_VERSION,tabelas:JSON.parse(JSON.stringify(PRICE_TABLES)) as JsonValue,industriaDisponivel:false,observacoes:'Indústria e faturamento além da última faixa dependem de parametrização. Tabela comercial, não tributária.'}),
+ // Dados do escritório usados em proposta e contrato. Ficam vazios de
+ // propósito: são preenchidos no sistema, nunca fixados no código nem
+ // versionados no repositório, porque incluem CPF e dados de assinatura.
+ entity('escritorio',{tipo:'escritorio',nome:'Dados do escritório para documentos',
+  escritorioRazaoSocial:'',escritorioNomeFantasia:'',escritorioCnpj:'',escritorioEndereco:'',
+  escritorioCidade:'',escritorioUf:'',escritorioCep:'',escritorioTelefone:'',escritorioEmail:'',
+  contadorNome:'',contadorCpf:'',contadorCrc:'',contadorEstadoCivil:'',contadorProfissao:'',contadorEndereco:'',
+  escritorioForo:'',escritorioRodape:'',escritorioLogotipo:'/brand/Logo.png',
+  escritorioConfidencialidade:'As partes obrigam-se a manter sigilo sobre todas as informações a que tiverem acesso em razão deste contrato, durante sua vigência e após o seu término.',
+  observacoes:'Preencha estes campos antes de gerar a primeira proposta ou contrato. A geração é bloqueada enquanto faltar dado obrigatório.'}),
+ entity('modelos-documento',{tipo:'modelosDocumento',nome:'Modelos de proposta e contrato',
+  modelos:JSON.parse(JSON.stringify(MODELOS_DOCUMENTO)) as JsonValue,
+  observacoes:'Estrutura e redação vindas dos modelos oficiais. Alterar cláusula cria nova versão e exige aprovação do sócio. Documento já gerado guarda a versão que usou.'}),
+ entity('tabela-precos',{tipo:'precos',nome:'Tabela comercial',versao:PRICE_VERSION,tabelas:JSON.parse(JSON.stringify(PRICE_TABLES)) as JsonValue,industriaDisponivel:true,tabelaIndustriaAprovada:false,descontoMaximoSemAprovacao:10,observacoes:'A tabela de Indústria é parametrização comercial sugerida em 15/09/2026 e depende de aprovação do sócio. Faturamento além da última faixa de Serviços e Comércio ainda exige parametrização. Tabela comercial, não tributária.'}),
+ entity('limite-ticket',{tipo:'parametro',nome:'Limite de ticket alto',valor:null,unidade:'honorário mensal em reais',parceiro:'Mister Contador',observacoes:'Enquanto o sócio não definir o valor, a classificação de ticket alto é marcada à mão na ativação do cliente. Nenhum limite foi fixado no código.'}),
  entity('planos',{tipo:'planos',nome:'Entregáveis por plano',Essencial:essential,Mentor:mentor,'Estratégico':[...mentor,'Reunião mensal de resultados de 1 hora','Análise de precificação','Suporte por telefone','Treinamento de processos','Planejamento financeiro','Escritório virtual incluso']}),
  entity('modelos-tarefas',{tipo:'modelosTarefas',nome:'Modelos de tarefas',modelos:JSON.parse(JSON.stringify(TASK_MODELS)) as JsonValue,orientacao:'Recomendações operacionais do escopo. Confirme a obrigação aplicável e o prazo vigente antes de ativar a recorrência. O sistema não presume prazo legal.'}),
  entity('modelos-processos',{tipo:'modelosProcessos',nome:'Templates de legalização',modelos:JSON.parse(JSON.stringify(PROCESS_TEMPLATES)) as JsonValue}),

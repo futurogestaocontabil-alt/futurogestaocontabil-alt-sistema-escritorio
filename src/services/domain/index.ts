@@ -1,7 +1,12 @@
 export { createInitialState } from './seed';
 export { runCommand, filterStateForActor, actorRole, DomainError } from './engine';
 export { calculatePrice, PRICE_TABLES, PRICE_VERSION, toCents } from './pricing';
-export type { PriceInput, PriceResult, PriceLine, Plan, Activity, TaxRegime, PriceExtra } from './pricing';
+export type { PriceInput, PriceResult, PriceLine, PriceCategory, Plan, Activity, TaxRegime, PriceExtra } from './pricing';
+export * from './catalogos';
+export * from './servicos';
+export { MODELOS_DOCUMENTO, MODELO_CONTRATO, MODELO_PROPOSTA, MODELO_CONTRATO_VERSAO, MODELO_PROPOSTA_VERSAO, preencherModelo, pendenciasDoModelo } from './modelosDocumento';
+export type { ModeloDocumento, SecaoModelo, CampoModelo } from './modelosDocumento';
+export { dueDateFor, nextCompetence } from './engine';
 export { TASK_MODELS, PROCESS_TEMPLATES, taskSteps, recommendRecurrences, createProcessStages } from './templates';
 export type { TaskModel } from './templates';
 export { COLLECTIONS } from '../../types/domain';
