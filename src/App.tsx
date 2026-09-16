@@ -17,7 +17,7 @@ import CrmPage from './pages/CrmPage';
 import ProcessesPage from './pages/ProcessesPage';
 import ContratosPage from './pages/ContratosPage';
 import OnboardingPage from './pages/OnboardingPage';
-import { api } from './services/api';
+import { api, MODO_DEMONSTRACAO } from './services/api';
 import { useApp } from './hooks/useApp';
 import { schemas } from './services/resourceSchema';
 import { entityName, text } from './utils/records';
@@ -44,6 +44,15 @@ function LoadingScreen() {
   return <div className="loading-screen"><img src="/brand/Logo.png" alt="Futuro Contabilidade Digital"/><span className="loading-mark"/><p>Preparando sua plataforma…</p></div>;
 }
 
+/** Aviso permanente para ninguém confundir a demonstração com o sistema real. */
+function FaixaDemonstracao() {
+  return <div className="faixa-demonstracao" role="status">
+    <strong>Ambiente de demonstração.</strong>
+    <span>Empresas, valores e conversas são fictícios. O que você alterar fica só no seu navegador e some ao fechar a aba. WhatsApp, Autentique e consulta de CNPJ estão desligados.</span>
+    <button type="button" onClick={() => { void (async () => { const { reiniciarDemonstracao } = await import('./services/demonstracao/servidor'); reiniciarDemonstracao(); window.location.reload(); })(); }}>Recomeçar do zero</button>
+  </div>;
+}
+
 function Shell({ children }: { children: ReactNode }) {
   const { actor, logout, state } = useApp();
   const [open, setOpen] = useState(false);
@@ -60,7 +69,7 @@ function Shell({ children }: { children: ReactNode }) {
       <nav className="main-nav" aria-label="Navegação principal">{navigation.map(item => { const Icon = item.icon; return <NavLink key={item.path} to={item.path} end={item.path === '/'} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}><Icon size={18}/><span>{item.label}</span>{item.path==='/tarefas'&&state.tarefas.filter(task=>!['Concluída','Concluído'].includes(text(task.status))).length>0?<em>{state.tarefas.filter(task=>!['Concluída','Concluído'].includes(text(task.status))).length}</em>:null}</NavLink>; })}</nav>
       <div className="sidebar-footer"><button className="profile-mini" onClick={() => navigate('/escritorio?aba=equipe')}><span className="avatar">{initials}</span><span><strong>{firstName}</strong><small>{text(actor.papel) || 'Acesso interno'}</small></span><ChevronRight size={15}/></button><button className="logout-link" onClick={() => void logout()}><LogOut size={16}/>Sair da plataforma</button></div>
     </aside>
-    <main className="main-area"><header className="topbar"><button className="mobile-menu" onClick={() => setOpen(true)} aria-label="Abrir menu"><Menu size={21}/></button><div className="breadcrumb"><span>Plataforma Futuro</span><ChevronRight size={14}/><strong>{navigation.find(item => item.path===location.pathname)?.label || 'Visão geral'}</strong></div><div className="topbar-actions"><span className="topbar-date"><CalendarCheck2 size={15}/> {new Intl.DateTimeFormat('pt-BR',{dateStyle:'medium'}).format(new Date())}</span><span className="topbar-avatar">{initials}</span></div></header><div className="page-content">{children}</div></main>
+    <main className="main-area">{MODO_DEMONSTRACAO ? <FaixaDemonstracao/> : null}<header className="topbar"><button className="mobile-menu" onClick={() => setOpen(true)} aria-label="Abrir menu"><Menu size={21}/></button><div className="breadcrumb"><span>Plataforma Futuro</span><ChevronRight size={14}/><strong>{navigation.find(item => item.path===location.pathname)?.label || 'Visão geral'}</strong></div><div className="topbar-actions"><span className="topbar-date"><CalendarCheck2 size={15}/> {new Intl.DateTimeFormat('pt-BR',{dateStyle:'medium'}).format(new Date())}</span><span className="topbar-avatar">{initials}</span></div></header><div className="page-content">{children}</div></main>
   </div>;
 }
 
